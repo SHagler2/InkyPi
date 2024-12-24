@@ -1,7 +1,7 @@
 import os
 from inky.auto import auto
 from utils.image_utils import resize_image, change_orientation
-from apps.app_registry import get_app_instance
+from plugins.plugins_registry import get_plugins_instance
 
 
 class DisplayManager:
@@ -16,27 +16,27 @@ class DisplayManager:
         self.inky_display = auto()
         self.inky_display.set_border(self.inky_display.BLACK)
 
-    def display_image(self, app_settings):
+    def display_image(self, plugin_settings):
         """
-        Generates and displays an image based on app settings.
+        Generates and displays an image based on plugin settings.
 
-        :param app_settings: Dictionary containing app settings.
+        :param plugin_settings: Dictionary containing plugin settings.
         """
-        app_id = app_settings.get("app_id")
-        app_config = next((app for app in self.device_config.get_apps() if app['id'] == app_id), None)
+        plugin_id = plugin_settings.get("plugin_id")
+        plugin_config = next((plugin for plugin in self.device_config.get_plugins() if plugin['id'] == plugin_id), None)
 
-        if not app_config:
-            raise ValueError(f"App '{app_id}' not found.")
+        if not plugin_config:
+            raise ValueError(f"Plugin '{plugin_id}' not found.")
 
-        app_instance = get_app_instance(app_config)
-        image = app_instance.generate_image(app_settings, self.device_config)
+        plugin_instance = get_plugin_instance(plugin_settings)
+        image = plugin_instance.generate_image(plugin_settings, self.device_config)
 
         # Save the image
         image.save(self.device_config.current_image_file)
 
         # Resize and adjust orientation
         image = change_orientation(image, self.device_config.get_config("orientation"))
-        image = resize_image(image, self.device_config.get_resolution(), app_config.get('image_settings', []))
+        image = resize_image(image, self.device_config.get_resolution(), plugin_config.get('image_settings', []))
 
         # Display the image on the Inky display
         self.inky_display.set_image(image)

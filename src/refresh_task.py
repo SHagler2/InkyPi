@@ -62,7 +62,7 @@ class RefreshTask:
                         # Decrement the timer and check if it's time to update
                         self.time_until_refresh -= sleep_time
                         update_display = self.time_until_refresh <= 0
-                        update_settings = refresh_settings.get("app_settings", {})
+                        update_settings = refresh_settings.get("plugin_settings", {})
 
                     if self.time_until_refresh <= 0:
                         self.time_until_refresh = refresh_settings.get("interval", 300)

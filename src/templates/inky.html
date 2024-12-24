@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AKZ Dev's Inky</title>
+    <title>{{ config.name }}</title>
 </head>
 <link rel= "stylesheet" type= "text/css" href= "{{ url_for('static',filename='styles/main.css') }}">
 <body>
@@ -24,11 +24,11 @@
 
         <!-- Separator -->
         <div class="separator"></div>
-        <h2 class="apps-title">Apps</h2>
+        <h2 class="plugins-title">Plugins</h2>
         <div class="button-grid">
-            {% for app in apps %}
-            <a href="{{ url_for('app.app_page', app_id=app.id) }}" class="icon-button">
-                <img src="{{ url_for('app.image', app_id=app.id, filename='icon.png') }}" title="{{ app.display_name }}" alt="{{ app.display_name }} icon" class="icon-image">
+            {% for plugin in plugins %}
+            <a href="{{ url_for('plugin.plugin_page', plugin_id=plugin.id) }}" class="icon-button">
+                <img src="{{ url_for('plugin.image', plugin_id=plugin.id, filename='icon.png') }}" title="{{ plugin.display_name }}" alt="{{ plugin.display_name }} icon" class="icon-image">
             </a>
             {% endfor %}
         </div>

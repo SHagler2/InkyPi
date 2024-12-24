@@ -1,6 +1,6 @@
 import os
 from utils.app_utils import resolve_path
-from apps.base_app.base_app import BaseApp
+from plugins.base_plugin.base_plugin import BasePlugin
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import numpy as np
@@ -34,7 +34,7 @@ FONTS = {
 
 DEFAULT_TIMEZONE = "US/Eastern"
 DEFAULT_CLOCK_FACE = "Gradient Clock"
-class ClockApp(BaseApp):
+class Clock(BasePlugin):
     def generate_settings_template(self):
         template_params = super().generate_settings_template()
         template_params['timezones'] = sorted(pytz.all_timezones_set)
@@ -73,7 +73,7 @@ class ClockApp(BaseApp):
     
     def draw_digital_clock(self, dimensions, time, primary_color=(51,67,73), secondary_color=(241,228,212), bg_color=(137,180,173)):
         w,h = dimensions
-        time_str = ClockApp.format_time(time.hour, time.minute, zero_pad = True)
+        time_str = Clock.format_time(time.hour, time.minute, zero_pad = True)
 
         image = Image.new("RGBA", dimensions, bg_color+(255,))
         text = Image.new("RGBA", dimensions, (0, 0, 0, 0))
@@ -108,24 +108,24 @@ class ClockApp(BaseApp):
         
     def draw_conic_clock(self, dimensions, time, primary_color=(219, 50, 70, 255), secondary_color=(0, 0, 0, 255) ):
         width, height = dimensions
-        hour_angle, minute_angle = ClockApp.calculate_clock_angles(time)
+        hour_angle, minute_angle = Clock.calculate_clock_angles(time)
 
         # Draw the hour hand gradient
-        image_hour = ClockApp.draw_gradient_image(
+        image_hour = Clock.draw_gradient_image(
             width, height, hour_angle, minute_angle, secondary_color, primary_color
         )
         # Draw the minute hand gradient
-        image_minute = ClockApp.draw_gradient_image(
+        image_minute = Clock.draw_gradient_image(
             width, height, minute_angle, hour_angle, secondary_color, primary_color
         )
 
         # Combine the images using alpha blending
         final_image = Image.alpha_composite(image_hour, image_minute)
 
-        ClockApp.draw_clock_hand(final_image, 185, minute_angle, primary_color, border_color=(255, 255, 255), border_width=3, hand_offset=25)
-        ClockApp.draw_clock_hand(final_image, 100, hour_angle, primary_color, border_color=(255, 255, 255), border_width=3, hand_offset=25)
+        Clock.draw_clock_hand(final_image, 185, minute_angle, primary_color, border_color=(255, 255, 255), border_width=3, hand_offset=25)
+        Clock.draw_clock_hand(final_image, 100, hour_angle, primary_color, border_color=(255, 255, 255), border_width=3, hand_offset=25)
 
-        ClockApp.drew_clock_center(final_image, 5.5, primary_color, outline_color=(255, 255, 255, 255), width=2)
+        Clock.drew_clock_center(final_image, 5.5, primary_color, outline_color=(255, 255, 255, 255), width=2)
 
         return final_image
 
@@ -149,13 +149,13 @@ class ClockApp(BaseApp):
         # clock outline
         image_draw.circle((w/2,h/2), face_size, fill=primary_color, outline=secondary_color, width=25)
 
-        ClockApp.draw_hour_marks(image_draw._image, face_size - 35)
+        Clock.draw_hour_marks(image_draw._image, face_size - 35)
 
-        hour_angle, minute_angle = ClockApp.calculate_clock_angles(time)
-        ClockApp.draw_clock_hand(image_draw._image, 150, minute_angle, secondary_color, hand_width=6, border_color=secondary_color, round_corners=False)
-        ClockApp.draw_clock_hand(image_draw._image, 80, hour_angle, secondary_color, hand_width=6, border_color=secondary_color, round_corners=False)
+        hour_angle, minute_angle = Clock.calculate_clock_angles(time)
+        Clock.draw_clock_hand(image_draw._image, 150, minute_angle, secondary_color, hand_width=6, border_color=secondary_color, round_corners=False)
+        Clock.draw_clock_hand(image_draw._image, 80, hour_angle, secondary_color, hand_width=6, border_color=secondary_color, round_corners=False)
 
-        ClockApp.drew_clock_center(image_draw._image, 6, primary_color, secondary_color, width=3)
+        Clock.drew_clock_center(image_draw._image, 6, primary_color, secondary_color, width=3)
 
         combined = Image.alpha_composite(bg, canvas)    
 
@@ -176,7 +176,7 @@ class ClockApp(BaseApp):
         elif h > w:
             border[1] += (h-w)/2
 
-        letter_positions = ClockApp.translate_word_grid_positions(time.hour % 12, time.minute)
+        letter_positions = Clock.translate_word_grid_positions(time.hour % 12, time.minute)
 
         letter_grid = [
             ['I','T','L','I','S','A','S','A','M','P','M'],
@@ -276,7 +276,7 @@ class ClockApp(BaseApp):
         start = (x1,y1)
         end = (x2,y2)
 
-        corners = ClockApp.calculate_rectangle_corners(start, end, hand_width)
+        corners = Clock.calculate_rectangle_corners(start, end, hand_width)
         if round_corners:
             draw.circle(start, hand_width/2, fill=border_color)
             draw.circle(end, hand_width/2, fill=border_color)

@@ -1,11 +1,11 @@
-from apps.base_app.base_app import BaseApp
+from plugins.base_plugin.base_plugin import BasePlugin
 from PIL import Image
 from io import BytesIO
 import logging
 
 logger = logging.getLogger(__name__)
 
-class ImageUploadApp(BaseApp):
+class ImageUpload(BasePlugin):
     def generate_image(self, settings, device_config):
         image_location = settings.get("imageFile")
 

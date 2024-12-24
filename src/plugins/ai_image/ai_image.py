@@ -1,5 +1,5 @@
 import urllib.request
-from apps.base_app.base_app import BaseApp
+from plugins.base_app.base_plugin import BasePlugin
 from openai import OpenAI
 from PIL import Image
 from io import BytesIO
@@ -13,7 +13,7 @@ DEFAULT_IMAGE_MODEL = "dall-e-3"
 
 IMAGE_QUALITIES = ["hd", "standard"]
 DEFAULT_IMAGE_QUALITY = "standard"
-class AIImageApp(BaseApp):
+class AIImage(BasePlugin):
     def generate_image(self, settings, device_config):
 
         api_key = device_config.load_env_key("OPEN_AI_SECRET")
@@ -34,9 +34,9 @@ class AIImageApp(BaseApp):
         try:
             ai_client = OpenAI(api_key = api_key)
             if randomize_prompt:
-                text_prompt = AIImageApp.fetch_image_prompt(ai_client, text_prompt)
+                text_prompt = AIImage.fetch_image_prompt(ai_client, text_prompt)
 
-            image = AIImageApp.fetch_image(
+            image = AIImage.fetch_image(
                 ai_client,
                 text_prompt,
                 model=image_model,

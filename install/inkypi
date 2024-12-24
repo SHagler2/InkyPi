@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# entry script to launch the app
+# entry script to launch the service
 
 PROGRAM_PATH=/usr/local/inkypi
 VENV_PATH="$PROGRAM_PATH/venv_inkypi"

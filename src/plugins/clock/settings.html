@@ -35,7 +35,7 @@
             {% if loop.index == 1 %} class="selected" {% endif %}
         >
             <img
-                src="{{ url_for('app.image', app_id='clock', filename=face.icon) }}"
+                src="{{ url_for('plugin.image', plugin_id='clock', filename=face.icon) }}"
                 alt="{{ face.name }}"
                 class="clock-face-icon"
             />

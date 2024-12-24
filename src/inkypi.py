@@ -22,10 +22,10 @@ from display_manager import DisplayManager
 from refresh_task import RefreshTask
 from blueprints.main import main_bp
 from blueprints.settings import settings_bp
-from blueprints.app import app_bp
+from blueprints.plugin import plugin_bp
 from blueprints.display import display_bp
 from jinja2 import ChoiceLoader, FileSystemLoader
-from apps.app_registry import load_apps
+from plugin.plugin_registry import load_plugins
 
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 logger.info("Starting web server")
 app = Flask(__name__)
 template_dirs = [
-   os.path.join(os.path.dirname(__file__), "templates"),  # Default template folder
-   os.path.join(os.path.dirname(__file__), "apps"),       # Apps templates
+   os.path.join(os.path.dirname(__file__), "templates"),    # Default template folder
+   os.path.join(os.path.dirname(__file__), "plugins"),      # Plugin templates
 ]
 app.jinja_loader = ChoiceLoader([FileSystemLoader(directory) for directory in template_dirs])
 
@@ -42,7 +42,7 @@ device_config = Config()
 display_manager = DisplayManager(device_config)
 refresh_task = RefreshTask(device_config, display_manager)
 
-load_apps(device_config.get_apps())
+load_plugins(device_config.get_plugin())
 
 # Store dependencies
 app.config['DEVICE_CONFIG'] = device_config
@@ -52,7 +52,7 @@ app.config['REFRESH_TASK'] = refresh_task
 # Register Blueprints
 app.register_blueprint(main_bp)
 app.register_blueprint(settings_bp)
-app.register_blueprint(app_bp)
+app.register_blueprint(plugin_bp)
 app.register_blueprint(display_bp)
 
 if __name__ == '__main__':

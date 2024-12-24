@@ -29,10 +29,10 @@ def update_now():
     refresh_task = current_app.config['REFRESH_TASK']
 
     try:
-        app_settings = request.form.to_dict()  # Get all form data
-        app_settings.update(handle_request_files(request.files))
+        plugin_settings = request.form.to_dict()  # Get all form data
+        plugin_settings.update(handle_request_files(request.files))
 
-        refresh_task.manual_update(app_settings)
+        refresh_task.manual_update(plugin_settings)
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 500
     except Exception as e:
@@ -41,8 +41,8 @@ def update_now():
     return jsonify({"success": True, "message": "Display updated"}), 200
 
 
-@display_bp.route('/schedule_app', methods=['POST'])
-def schedule_app():
+@display_bp.route('/schedule_plugin', methods=['POST'])
+def schedule_plugin():
     device_config = current_app.config['DEVICE_CONFIG']
     refresh_task = current_app.config['REFRESH_TASK']
 
@@ -51,16 +51,16 @@ def schedule_app():
         refresh_settings = json.loads(form_data.pop("refresh_settings"))
         if not refresh_settings.get('interval') or not refresh_settings["interval"].isnumeric():
             raise RuntimeError("Invalid refresh interval.")
-        if not refresh_settings.get('unit') or not refresh_settings["unit"] not in ["minut", "hour", "day"]:
+        if not refresh_settings.get('unit') or refresh_settings["unit"] not in ["minute", "hour", "day"]:
             raise RuntimeError("Invalid refresh unit.")
 
-        app_settings = form_data
-        app_settings.update(handle_request_files(request.files))
+        plugin_settings = form_data
+        plugin_settings.update(handle_request_files(request.files))
 
         refresh_interval_seconds = calculate_seconds(int(refresh_settings.get("interval")), refresh_settings.get("unit"))
         device_config.update_value("refresh_settings", {
             "interval": refresh_interval_seconds,
-            "app_settings": app_settings
+            "plugin_settings": plugin_settings
         })
         refresh_task.update_refresh_settings()
     except RuntimeError as e:

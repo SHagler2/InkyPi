@@ -1,14 +1,14 @@
-from apps.base_app.base_app import BaseApp
+from plugins.base_plugin.base_plugin import BasePlugin
 from datetime import datetime, timedelta
 from utils.image_utils import get_image
 from PIL import Image
 import logging
-from apps.newspaper.constants import NEWSPAPERS
+from plugins.newspaper.constants import NEWSPAPERS
 
 logger = logging.getLogger(__name__)
 
 FREEDOM_FORUM_URL = "https://cdn.freedomforum.org/dfp/jpg{}/lg/{}.jpg"
-class NewspaperApp(BaseApp):
+class Newspaper(BasePlugin):
     def generate_image(self, settings, device_config):
         newspaper_slug = settings.get('newspaperSlug')
 

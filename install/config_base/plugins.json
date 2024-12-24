@@ -2,22 +2,22 @@
     {
         "display_name": "AI Image",
         "id": "ai_image",
-        "class": "AIImageApp"
+        "class": "AIImage"
     },
     {
         "display_name": "Image Upload",
         "id": "image_upload",
-        "class": "ImageUploadApp"
+        "class": "ImageUpload"
     },
     {
         "display_name": "Today's Newspaper",
         "id": "newspaper",
-        "class": "NewspaperApp",
+        "class": "Newspaper",
         "image_settings": ["keep-width"]
     },
     {
         "display_name": "Clock",
         "id": "clock",
-        "class": "ClockApp"
+        "class": "Clock"
     }
 ]

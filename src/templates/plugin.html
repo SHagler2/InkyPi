@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ app.display_name }} Settings</title>
+    <title>{{ plugin.display_name }} Settings</title>
     <link rel= "stylesheet" type= "text/css" href= "{{ url_for('static',filename='styles/main.css') }}">
     <script src="{{ url_for('static', filename='scripts/response_modal.js') }}"></script>
     <script>
@@ -11,13 +11,13 @@
             const loadingIndicator = document.getElementById('loadingIndicator');
             loadingIndicator.style.display = 'block';
 
-            // Gather app settings form data
+            // Gather plugin settings form data
             const form = document.getElementById('settingsForm');
             const formData = new FormData(form);
             let url = '{{ url_for("display.update_now") }}';
 
             if (action == "schedule"){
-                url = '{{ url_for("display.schedule_app") }}';
+                url = '{{ url_for("display.schedule_plugin") }}';
                 const scheduleForm = document.getElementById('scheduleForm');
                 const scheduleFormData = new FormData(scheduleForm);
                 const scheduleData = {};
@@ -26,8 +26,6 @@
                 }
                 formData.append("refresh_settings", JSON.stringify(scheduleData));
             }
-
-            const appSettingsData = {};
 
             // Send data to the server
             try {
@@ -83,23 +81,22 @@
         <!-- Back Button -->
         <button onclick="history.back()" class="back-button">← Back</button>
 
-        <!-- App Title and Icon -->
+        <!-- Plugin Title and Icon -->
         <div class="app-header">
-            <img src="{{ url_for('app.image', app_id=app.id, filename='icon.png') }}" alt="{{ app.display_name }} icon" class="app-icon">
-            <h1 class="app-title">{{ app.display_name }}</h1>
+            <img src="{{ url_for('plugin.image', plugin_id=plugin.id, filename='icon.png') }}" alt="{{ plugin.display_name }} icon" class="app-icon">
+            <h1 class="app-title">{{ plugin.display_name }}</h1>
             <div id="loadingIndicator" class="loading-indicator"></div>
         </div>
         <div class="separator"></div>
 
-        <!-- Include app-specific content -->
+        <!-- Include plugin settings -->
         <form id = "settingsForm" class="settings-form" onsubmit="return false;">
-            <!-- Include app-specific content -->
             <div id="settings-container">
                 {% include settings_template %}
             </div>
 
-            <!-- Hidden input to pass app name -->
-            <input type="hidden" name="app_id" value="{{ app.id }}">
+            <!-- Hidden input to pass plugin id -->
+            <input type="hidden" name="plugin_id" value="{{ plugin.id }}">
         </form>
  
         <!-- Buttons -->

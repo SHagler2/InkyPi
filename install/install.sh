@@ -123,6 +123,28 @@ install_executable() {
   sudo chmod +x $BINPATH/$APPNAME
 }
 
+install_config() {
+  CONFIG_BASE_DIR="$SCRIPT_DIR/config_base"
+  CONFIG_DIR="$SRC_PATH/config"
+  echo "Copying config files to $CONFIG_DIR"
+
+  # Check and copy device.config if it doesn't exist
+  if [ ! -f "$CONFIG_DIR/device.config" ]; then
+    echo "Copying device.config to $CONFIG_DIR"
+    cp "$CONFIG_BASE_DIR/device.config" "$CONFIG_DIR/"
+  else
+    echo "device.config already exists in $CONFIG_DIR"
+  fi
+
+  # Check and copy plugins.config if it doesn't exist
+  if [ ! -f "$CONFIG_DIR/plugins.config" ]; then
+    echo "Copying plugins.config to $CONFIG_DIR"
+    cp "$CONFIG_BASE_DIR/plugins.config" "$CONFIG_DIR/"
+  else
+    echo "plugins.config already exists in $CONFIG_DIR"
+  fi
+}
+
 stop_service() {
     echo "Checking if $SERVICE_FILE is running"
     if /usr/bin/systemctl is-active --quiet $SERVICE_FILE
@@ -145,13 +167,11 @@ copy_project() {
   then
     echo "Removing existing installation found at $INSTALL_PATH"
     rm -rf $INSTALL_PATH > /dev/null
-    #show_loader "Removing existing installation found at $INSTALL_PATH"
+    show_loader "Removing existing installation found at $INSTALL_PATH"
   fi
   echo "Installing project files to $INSTALL_PATH"
   mkdir -p $INSTALL_PATH
   ln -sf $SRC_PATH $INSTALL_PATH/src
-  #rsync -a $SRC_PATH $INSTALL_PATH > /dev/null &
-  #show_loader "Installing project files to $INSTALL_PATH"
 }
 
 stop_service
@@ -161,5 +181,6 @@ install_debian_dependencies
 copy_project
 create_venv
 install_executable
+install_config
 install_app_service
 start_service
