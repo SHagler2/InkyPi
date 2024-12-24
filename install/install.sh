@@ -33,7 +33,7 @@ PIP_REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
 check_permissions() {
   # Ensure the script is run with sudo
   if [ "$EUID" -ne 0 ]; then
-    echo "ERROR: Installation requires root privileges. Please run it with sudo."
+    echo_error "ERROR: Installation requires root privileges. Please run it with sudo."
     exit 1
   fi
 }
@@ -162,16 +162,17 @@ start_service() {
 }
 
 copy_project() {
-  # check if existing inkypi is already installed is installed
-  if [[ -d $INSTALL_PATH ]] 
-  then
-    echo "Removing existing installation found at $INSTALL_PATH"
-    rm -rf $INSTALL_PATH > /dev/null
-    show_loader "Removing existing installation found at $INSTALL_PATH"
+  # Check if an existing installation is present
+  echo "Installing $APPNAME to $INSTALL_PATH"
+  if [[ -d $INSTALL_PATH ]]; then
+    rm -rf "$INSTALL_PATH" > /dev/null
+    show_loader "\tRemoving existing installation found at $INSTALL_PATH"
   fi
-  echo "Installing project files to $INSTALL_PATH"
-  mkdir -p $INSTALL_PATH
-  ln -sf $SRC_PATH $INSTALL_PATH/src
+
+  mkdir -p "$INSTALL_PATH"
+
+  ln -sf "$SRC_PATH" "$INSTALL_PATH/src"
+  show_loader "\tCreating symlink from $SRC_PATH to $INSTALL_PATH/src"
 }
 
 stop_service
