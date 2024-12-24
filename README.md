@@ -22,9 +22,28 @@ InkyPi is an open-source, customizable E-Ink display powered by a Raspberry Pi. 
     - **[7.3 Inch Display](https://shop.pimoroni.com/products/inky-impression-7-3)**
 - Picture Frame or 3D Stand
 
+## Installation
+To install InkyPi, follow these steps:
+
+1. Clone the repository:
+    ```bash
+    git clone https://github.com/fatihak/InkyPi.git
+    ```
+2. Navigate to the project directory:
+    ```bash
+    cd InkyPi
+    ```
+3. Run the installation script with sudo:
+    ```bash
+    sudo bash install/install.sh
+    ```
+Note: 
+- The installation script requires sudo privileges to install and run the service. We recommend starting with a fresh installation of Raspberry Pi OS to avoid potential conflicts with existing software or configurations.
+- The installation process will automatically enable the required SPI and I²C interfaces on your pi device.
+
 ## License
 
-Distributed under the Unlicense License. See [LICENSE](./LICENSE) for more information.
+Distributed under the MIT License, see [LICENSE](./LICENSE) for more information.
 
 ## Issues
 

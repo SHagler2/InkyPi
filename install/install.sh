@@ -129,19 +129,19 @@ install_config() {
   echo "Copying config files to $CONFIG_DIR"
 
   # Check and copy device.config if it doesn't exist
-  if [ ! -f "$CONFIG_DIR/device.config" ]; then
-    echo "Copying device.config to $CONFIG_DIR"
-    cp "$CONFIG_BASE_DIR/device.config" "$CONFIG_DIR/"
+  if [ ! -f "$CONFIG_DIR/device.json" ]; then
+    cp "$CONFIG_BASE_DIR/device.json" "$CONFIG_DIR/"
+    show_loader "\tCopying device.config to $CONFIG_DIR"
   else
-    echo "device.config already exists in $CONFIG_DIR"
+    echo_success "\tdevice.json already exists in $CONFIG_DIR"
   fi
 
   # Check and copy plugins.config if it doesn't exist
-  if [ ! -f "$CONFIG_DIR/plugins.config" ]; then
-    echo "Copying plugins.config to $CONFIG_DIR"
-    cp "$CONFIG_BASE_DIR/plugins.config" "$CONFIG_DIR/"
+  if [ ! -f "$CONFIG_DIR/plugins.json" ]; then
+    cp "$CONFIG_BASE_DIR/plugins.json" "$CONFIG_DIR/"
+    show_loader "\tCopying plugins.config to $CONFIG_DIR"
   else
-    echo "plugins.config already exists in $CONFIG_DIR"
+    echo_success "\tplugins.json already exists in $CONFIG_DIR"
   fi
 }
 
