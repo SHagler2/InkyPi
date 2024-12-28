@@ -13,7 +13,7 @@ class Config:
     config_file = os.path.join(BASE_DIR, "config", "device.json")
     plugins_file = os.path.join(BASE_DIR, "config", "plugins.json")
 
-    current_image_file = os.path.join(BASE_DIR, "static","current_image.png")
+    current_image_file = os.path.join(BASE_DIR, "static", "images", "current_image.png")
 
     def __init__(self):
         logger.info(self.config_file)
@@ -46,7 +46,7 @@ class Config:
         return self.plugins_list
 
     def get_resolution(self):
-        resolution = self.get_config("resolution").split('x')
+        resolution = self.get_config("resolution")
         width, height = resolution
         return (int(width), int(height))
 

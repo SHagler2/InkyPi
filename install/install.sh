@@ -1,10 +1,8 @@
 #!/bin/bash
 
-#formatting stuff
+# Formatting stuff
 bold=$(tput bold)
-underline=$(tput smul)
 normal=$(tput sgr0)
-
 red=$(tput setaf 1)
 green=$(tput setaf 2)
 
@@ -12,7 +10,7 @@ SOURCE=${BASH_SOURCE[0]}
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
   DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
   SOURCE=$(readlink "$SOURCE")
-  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where >
+  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE
 done
 SCRIPT_DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 
@@ -85,6 +83,10 @@ echo_header() {
 
 echo_error() {
   echo -e "${red}$1${normal} [\e[31m\xE2\x9C\x98\e[0m]\n"
+}
+
+echo_blue() {
+  echo -e "\e[38;2;65;105;225m$1\e[0m"
 }
 
 
@@ -175,8 +177,45 @@ copy_project() {
   show_loader "\tCreating symlink from $SRC_PATH to $INSTALL_PATH/src"
 }
 
-stop_service
+# Get Raspberry Pi hostname
+get_hostname() {
+  echo "$(hostname)"
+}
+
+# Get Raspberry Pi IP address
+get_ip_address() {
+  ip_address=$(hostname -I | awk '{print $1}')
+  echo "$ip_address"
+}
+
+ask_for_reboot() {
+  # Get hostname and IP address
+  hostname=$(get_hostname)
+  ip_address=$(get_ip_address)
+  echo_header "$(echo_success "${APPNAME^^} Installation Complete!")"
+  echo_header "[•] A reboot of your Raspberry Pi is required for the changes to take effect"
+  echo_header "[•] After your Pi is rebooted, you can access the web UI by going to $(echo_blue "'$hostname.local'") or $(echo_blue "'$ip_address'") in your browser."
+  echo_header "[•] If you encounter any issues or have suggestions, please submit them here: https://github.com/fatihak/InkyPi/issues"
+
+  read -p "Would you like to restart your Raspberry Pi now? [Y/N] " userInput
+  userInput="${userInput^^}"
+
+  if [[ "${userInput,,}" == "y" ]] then
+    echo_success "You entered 'Y', rebooting now..."
+    sleep 2
+    sudo reboot now
+  elif [[ "${userInput,,}" == "n" ]]; then
+    echo "Please restart your Raspberry Pi later to apply changes by running 'sudo reboot now'."
+    exit
+  else
+    echo "Unknown input, please restart your Raspberry Pi later to apply changes by running 'sudo reboot now'."
+    sleep 1
+  fi
+}
+
+
 check_permissions
+stop_service
 enable_interfaces
 install_debian_dependencies
 copy_project
@@ -184,4 +223,4 @@ create_venv
 install_executable
 install_config
 install_app_service
-start_service
+ask_for_reboot

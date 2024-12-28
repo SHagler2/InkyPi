@@ -15,7 +15,6 @@ def save_settings():
         form_data = request.form.to_dict()
         settings = {
             "name": form_data.get("deviceName"),
-            "resolution": form_data.get("resolution"),
             "orientation": form_data.get("orientation")
         }
         device_config.update_config(settings)

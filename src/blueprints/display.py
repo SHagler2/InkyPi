@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 display_bp = Blueprint("display", __name__)
 
 ALLOWED_FILE_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'gif'}
-FILE_SAVE_DIR = resolve_path(os.path.join("static","saved_images"))
+FILE_SAVE_DIR = resolve_path(os.path.join("static", "images", "saved"))
 
 def handle_request_files(request_files):
     file_location_map = {}

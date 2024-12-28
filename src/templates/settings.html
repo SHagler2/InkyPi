@@ -55,15 +55,6 @@
                            required 
                            class="form-input">
                 </div>
-                <!-- Resolution Dropdown -->
-                <div class="form-group">
-                    <label for="resolution" class="form-label">Resolution:</label>
-                    <select id="resolution" name="resolution" class="form-input">
-                        <option value="800x480" {% if device_settings.dimensions == '800x480' %}selected{% endif %}>800x480</option>
-                        <option value="600x448" {% if device_settings.dimensions == '600x448' %}selected{% endif %}>600x448</option>
-                        <option value="640x400" {% if device_settings.dimensions == '640x400' %}selected{% endif %}>640x400</option>
-                    </select>
-                </div>
                 <!-- Orientation Dropdown -->
                 <div class="form-group">
                     <label for="orientation" class="form-label">Orientation:</label>

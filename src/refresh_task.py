@@ -50,7 +50,7 @@ class RefreshTask:
                     # Exit if `stop()` is called
                     if not self.running:
                         break 
-                    
+
                     # Handle immediate updates
                     if self.manual_update_settings:
                         logger.info("Manual update requested")
@@ -69,7 +69,7 @@ class RefreshTask:
 
                     if update_display and update_settings:
                         logger.info("Refreshing display...")
-                        self.display_manager.display_image(update_settings)
+                        self.display_manager.display_plugin(update_settings)
                     else:
                         logger.info(f"Next refresh in {self.time_until_refresh} seconds.")
 

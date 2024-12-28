@@ -1,5 +1,5 @@
 import urllib.request
-from plugins.base_app.base_plugin import BasePlugin
+from plugins.base_plugin import BasePlugin
 from openai import OpenAI
 from PIL import Image
 from io import BytesIO

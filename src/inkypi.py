@@ -15,6 +15,7 @@ import sys
 import json
 import logging
 import threading
+from utils.app_utils import generate_startup_image
 from flask import Flask, request
 from werkzeug.serving import is_running_from_reloader
 from config import Config
@@ -25,7 +26,7 @@ from blueprints.settings import settings_bp
 from blueprints.plugin import plugin_bp
 from blueprints.display import display_bp
 from jinja2 import ChoiceLoader, FileSystemLoader
-from plugin.plugin_registry import load_plugins
+from plugins.plugin_registry import load_plugins
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ device_config = Config()
 display_manager = DisplayManager(device_config)
 refresh_task = RefreshTask(device_config, display_manager)
 
-load_plugins(device_config.get_plugin())
+load_plugins(device_config.get_plugins())
 
 # Store dependencies
 app.config['DEVICE_CONFIG'] = device_config
@@ -58,8 +59,15 @@ app.register_blueprint(display_bp)
 if __name__ == '__main__':
     from werkzeug.serving import is_running_from_reloader
 
+    # start the background refresh task
     if not is_running_from_reloader():
         refresh_task.start()
+
+    # display default inkypi image on startup
+    if device_config.get_config("startup") is True:
+        img = generate_startup_image(device_config.get_resolution())
+        display_manager.display_image(img)
+        device_config.update_value("startup", False)
 
     try:
         # Run the Flask app

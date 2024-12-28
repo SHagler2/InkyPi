@@ -1,6 +1,6 @@
 {
-    "name": "AKZ's New Inky!",
-    "resolution": "800x480",
+    "name": "InkyPi",
     "orientation": "horizontal",
-    "scheduler_sleep_time": 60
+    "scheduler_sleep_time": 60,
+    "startup": true
 }

@@ -13,16 +13,20 @@ VENV_PATH="$INSTALL_PATH/venv_$APPNAME"
 SERVICE_FILE="/etc/systemd/system/$APPNAME.service"
 CONFIG_DIR="$INSTALL_PATH/src/config"
 
+echo_success() {
+  echo -e "$1 [\e[32m\xE2\x9C\x94\e[0m]"
+}
+
+echo_override() {
+  echo -e "\r$1"
+}
+
 echo_header() {
   echo -e "${bold}$1${normal}"
 }
 
-echo_success() {
-  echo -e "$1 [${green}✔${normal}]"
-}
-
 echo_error() {
-  echo -e "$1 [${red}✘${normal}]"
+  echo -e "${red}$1${normal} [\e[31m\xE2\x9C\x98\e[0m]\n"
 }
 
 check_permissions() {
@@ -91,5 +95,5 @@ stop_service
 disable_service
 remove_files
 
-echo "Uninstallation complete."
-echo_success "All components of $APPNAME have been removed."
+echo_success "Uninstallation complete."
+echo_header "All components of $APPNAME have been removed."
