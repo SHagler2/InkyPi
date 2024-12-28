@@ -8,9 +8,9 @@ from PIL import Image, ImageDraw, ImageFont
 logger = logging.getLogger(__name__)
 
 FONTS = {
-    "ds-gigi": resolve_path(os.path.join("static","fonts","DS-DIGI.TTF")),
-    "napoli": resolve_path(os.path.join("static","fonts","Napoli.ttf")),
-    "jost": resolve_path(os.path.join("static","fonts","Jost.ttf")),
+    "ds-gigi": "DS-DIGI.TTF",
+    "napoli": "Napoli.ttf",
+    "jost": "Jost.ttf"
 }
 
 def resolve_path(file_path):
@@ -42,7 +42,8 @@ def is_connected():
 
 def get_font(font_name, font_size=50):
     if font_name in FONTS:
-        return ImageFont.truetype(FONTS["jost"], font_size)
+        font_path = resolve_path(os.path.join("static", "fonts", FONTS[font_name]))
+        return ImageFont.truetype(font_path, font_size)
     else:
         logger.warn(f"Requested font not found: font_name: {font_name}")
     return None
@@ -58,10 +59,11 @@ def generate_startup_image(dimensions=(800,480)):
     image = Image.new("RGBA", dimensions, bg_color)
     image_draw = ImageDraw.Draw(image)
 
-    # TODO: dont use use hardcoded font sizes
-    image_draw.text((width/2, height/2), "inkypi", anchor="mm", fill=text_color, font=get_font("jost", 120))
+    title_font_size = width * 0.145
+    image_draw.text((width/2, height/2), "inkypi", anchor="mm", fill=text_color, font=get_font("jost", title_font_size))
 
     text = f"To get started, visit http://{hostname}"
-    image_draw.text((width/2, height*3/4), text, anchor="mm", fill=text_color, font=get_font("jost", 20))
+    text_font_size = width * 0.032
+    image_draw.text((width/2, height*3/4), text, anchor="mm", fill=text_color, font=get_font("jost", text_font_size))
 
     return image

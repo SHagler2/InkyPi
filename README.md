@@ -37,9 +37,37 @@ To install InkyPi, follow these steps:
     ```bash
     sudo bash install/install.sh
     ```
+
+Once the Pi reboots, the display should refresh with the InkyPi splash screen.
+
 Note: 
 - The installation script requires sudo privileges to install and run the service. We recommend starting with a fresh installation of Raspberry Pi OS to avoid potential conflicts with existing software or configurations.
 - The installation process will automatically enable the required SPI and I²C interfaces on your pi device.
+
+## Uninstall
+To install InkyPi, follow these steps:
+
+1. Clone the repository:
+    ```bash
+    git clone https://github.com/fatihak/InkyPi.git
+    ```
+2. Navigate to the project directory:
+    ```bash
+    cd InkyPi
+    ```
+3. Run the installation script with sudo:
+    ```bash
+    sudo bash install/install.sh
+    ```
+Note: 
+- The installation script requires sudo privileges to install and run the service. We recommend starting with a fresh installation of Raspberry Pi OS to avoid potential conflicts with existing software or configurations.
+- The installation process will automatically enable the required SPI and I²C interfaces on your pi device.
+
+## Uninstall
+To uninstall InkyPi, run the following command:
+```bash
+sudo bash install/uninstall.sh
+```
 
 ## License
 
