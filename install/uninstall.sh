@@ -78,6 +78,22 @@ remove_files() {
   else
     echo_success "\tExecutable $BINPATH/$APPNAME does not exist."
   fi
+
+  # Remove device.json if it exists
+  if [ -f "$CONFIG_DIR/device.json" ]; then
+    rm "$CONFIG_DIR/device.json"
+    echo_success "\tRemoved device.json."
+  else
+    echo_success "\tdevice.json does not exist in $CONFIG_DIR"
+  fi
+
+  # Remove plugins.json if it exists
+  if [ -f "$CONFIG_DIR/plugins.json" ]; then
+    rm "$CONFIG_DIR/plugins.json"
+    echo_success "\tRemoved plugins.json."
+  else
+    echo_success "\tplugins.json does not exist in $CONFIG_DIR"
+  fi
 }
 
 confirm_uninstall() {

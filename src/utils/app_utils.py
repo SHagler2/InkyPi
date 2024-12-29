@@ -62,7 +62,7 @@ def generate_startup_image(dimensions=(800,480)):
     title_font_size = width * 0.145
     image_draw.text((width/2, height/2), "inkypi", anchor="mm", fill=text_color, font=get_font("jost", title_font_size))
 
-    text = f"To get started, visit http://{hostname}"
+    text = f"To get started, visit http://{hostname}.local"
     text_font_size = width * 0.032
     image_draw.text((width/2, height*3/4), text, anchor="mm", fill=text_color, font=get_font("jost", text_font_size))
 
