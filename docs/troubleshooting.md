@@ -51,10 +51,4 @@ sudo /usr/local/bin/inkypi -d
 
 ## API Key not configured
 
-Some plugins require API Keys to be configured in order to run. These need to be configured in a .env file at the root of the project.
-
-Navigate to the root directory of the InkyPi project on the raspberry pi terminal, and save the api key in the .env file:
-```bash
-cd InkyPi
-vi .env
-```
+Some plugins require API Keys to be configured in order to run. These need to be configured in a .env file at the root of the project. See [Storing API Credentials](installation.md#storing-api-credentials) for details.

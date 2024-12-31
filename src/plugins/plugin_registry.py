@@ -17,7 +17,7 @@ def load_plugins(plugins_config):
         if plugin.get("disabled", False):
             logging.info(f"Plugin {plugin_id} is disabled, skipping.")
             continue
-        
+
         plugin_dir = plugins_module_path / plugin_id
         if not plugin_dir.is_dir():
             logging.error(f"Could not find plugin directory {plugin_dir} for '{plugin_id}', skipping.")
@@ -27,7 +27,7 @@ def load_plugins(plugins_config):
         if not module_path.is_file():
             logging.error(f"Could not find module path {module_path} for '{plugin_id}', skipping.")
             continue
-        
+
         module_name = f"plugins.{plugin_id}.{plugin_id}"
         try:
             module = importlib.import_module(module_name)

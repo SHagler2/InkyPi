@@ -11,7 +11,7 @@ InkyPi is an open-source, customizable E-Ink display powered by a Raspberry Pi. 
 - Web Interface allows you to update and configure the display from any device on your network
 - Minimize distractions: no LEDS, noise, or notifications, just the content you care about
 - Easy installation and configuration, perfect for beginners and makers alike
-- Open source: distributed under the MIT license, allowing you to modify, customize, and create your own plugins
+- Open source project allowing you to modify, customize, and create your own plugins
 
 **Plugins**:
 
@@ -20,7 +20,7 @@ InkyPi is an open-source, customizable E-Ink display powered by a Raspberry Pi. 
 - Clock: Customizable clock faces for displaying time
 - AI Image: Generate images from text prompts using ChatGPT's DALL·E
 
-And additional plugins coming soon!
+And additional plugins coming soon! For documentation on building custom plugins, see [Building InkyPi Plugins](./docs/building_plugins.md).
 
 ## Hardware
 
@@ -53,7 +53,9 @@ After the installation is complete, the script will prompt you to reboot your Ra
 
 Note: 
 - The installation script requires sudo privileges to install and run the service. We recommend starting with a fresh installation of Raspberry Pi OS to avoid potential conflicts with existing software or configurations.
-- The installation process will automatically enable the required SPI and I²C interfaces on your Raspberry Pi.
+- The installation process will automatically enable the required SPI and I2C interfaces on your Raspberry Pi.
+
+"For more details, including instructions on how to image your microSD with Raspberry Pi OS, refer to [installation.md](./docs/installation.md). You can also checkout [this YouTube tutorial](https://youtu.be/L5PvQj1vfC4).
 
 ## Uninstall
 To install InkyPi, simply run the following command:
@@ -62,10 +64,28 @@ To install InkyPi, simply run the following command:
 sudo bash install/uninstall.sh
 ```
 
+## Roadmap
+The InkyPi project is constantly evolving, with many exciting features and improvements planned for the future.
+
+- Plugins, plugins, plugins
+- Enhanced scheduling functionality
+- Modular layouts to mix and match plugins
+- Improved Web UI on mobile devices
+- Support for Waveshare devices
+
 ## License
 
-Distributed under the MIT License, see [LICENSE](./LICENSE) for more information.
+Distributed under the GPL 3.0 License, see [LICENSE](./LICENSE) for more information.
 
 ## Issues
 
 Check out the [troubleshooting guide](./docs/Troubleshooting.md). If you're still having trouble, feel free to create an issue on the [GitHub Issues](https://github.com/fatihak/InkyPi/issues) page.
+
+## Acknowledgements
+
+Check out these similar projects:
+
+- [PaperPi](https://github.com/txoof/PaperPi) - awesome project that supports waveshare devices
+    - shoutout to @txoof for assisting with InkyPi's installation process
+- [InkyCal](https://github.com/aceinnolab/Inkycal) - has modular plugins for building custom dashboards
+- [PiInk](https://github.com/tlstommy/PiInk) - inspiration behind InkyPi's flask web ui
