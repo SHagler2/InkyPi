@@ -79,7 +79,7 @@ Distributed under the GPL 3.0 License, see [LICENSE](./LICENSE) for more informa
 
 ## Issues
 
-Check out the [troubleshooting guide](./docs/Troubleshooting.md). If you're still having trouble, feel free to create an issue on the [GitHub Issues](https://github.com/fatihak/InkyPi/issues) page.
+Check out the [troubleshooting guide](./docs/troubleshooting.md). If you're still having trouble, feel free to create an issue on the [GitHub Issues](https://github.com/fatihak/InkyPi/issues) page.
 
 ## Acknowledgements
 
