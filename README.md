@@ -70,6 +70,7 @@ The InkyPi project is constantly evolving, with many exciting features and impro
 - Plugins, plugins, plugins
 - Enhanced scheduling functionality
 - Modular layouts to mix and match plugins
+- Support for buttons with customizable action bindings
 - Improved Web UI on mobile devices
 - Support for Waveshare devices
 

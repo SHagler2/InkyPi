@@ -20,7 +20,7 @@ class AIImage(BasePlugin):
         if not api_key:
             raise RuntimeError("OPEN AI API Key not configured.")
 
-        text_prompt = settings.get("inputText")
+        text_prompt = settings.get("inputText", "")
 
         image_model = settings.get('imageModel', DEFAULT_IMAGE_MODEL)
         if image_model not in IMAGE_MODELS:
@@ -47,39 +47,36 @@ class AIImage(BasePlugin):
             logger.error(f"Failed to make Open AI request: {str(e)}")
             raise RuntimeError("Open AI request failure, please check logs.")
         return image
-    
+
     @staticmethod
     def fetch_image(ai_client, prompt, model="dalle-e-3", quality="standard", orientation="horizontal"):
         logger.info(f"Generating image for prompt: {prompt}, model: {model}, quality: {quality}")
-        img = None
-        try:
-            prompt += (
-                ". The image should fully occupy the entire canvas without any frames, "
-                "borders, or cropped areas. No blank spaces or artificial framing."
-            )
-            prompt += (
-                "Focus on simplicity, bold shapes, and strong contrast to enhance clarity "
-                "and visual appeal. Avoid excessive detail or complex gradients, ensuring "
-                "the design works well with flat, vibrant colors."
-            )
-            args = {
-                "model": model,
-                "prompt": prompt,
-                "size": "1024x1024",
-                "quality": "standard"
-            }
-            if model == "dall-e-3":
-                args["size"] = "1792x1024" if orientation == "horizontal" else "1024x1792"
-                args["quality"] = quality
+        prompt += (
+            ". The image should fully occupy the entire canvas without any frames, "
+            "borders, or cropped areas. No blank spaces or artificial framing."
+        )
+        prompt += (
+            "Focus on simplicity, bold shapes, and strong contrast to enhance clarity "
+            "and visual appeal. Avoid excessive detail or complex gradients, ensuring "
+            "the design works well with flat, vibrant colors."
+        )
+        args = {
+            "model": model,
+            "prompt": prompt,
+            "size": "1024x1024",
+            "quality": "standard"
+        }
+        if model == "dall-e-3":
+            args["size"] = "1792x1024" if orientation == "horizontal" else "1024x1792"
+            args["quality"] = quality
 
-            response = ai_client.images.generate(**args)
-            image_url = response.data[0].url
-            response = requests.get(image_url)
-            img = Image.open(BytesIO(response.content))
-        except Exception as e:
-            logger.exception("Failed to generate an image:")
+        response = ai_client.images.generate(**args)
+        image_url = response.data[0].url
+        response = requests.get(image_url)
+        img = Image.open(BytesIO(response.content))
+
         return img
-    
+
     @staticmethod
     def fetch_image_prompt(ai_client, from_prompt=None):
         logger.info(f"Getting random image prompt...")
@@ -89,7 +86,7 @@ class AIImage(BasePlugin):
             "Avoid common themes. Focus on unexpected, unconventional, and bizarre combinations "
             "of art style, medium, subjects, time periods, and moods. No repetition. Prompts "
             "should be 20 words or less and specify random artist, movie, tv show or time period "
-            "for the theme. Do not provide any headers or repeat the request, just provide the updated "
+            "for the theme. Do not provide any headers or repeat the request, just provide the "
             "updated prompt in your response."
         )
         user_content = (
@@ -116,7 +113,6 @@ class AIImage(BasePlugin):
                 "true to the original idea. Include vivid imagery and descriptive details. "
                 "Avoid changing the subject of the prompt."
             )
-    
 
         # Make the API call
         response = ai_client.chat.completions.create(
