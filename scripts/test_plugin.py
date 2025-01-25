@@ -13,9 +13,12 @@ RESOLUTIONS = [
 ]
 ORIENTATIONS = ["horizontal", "vertical"]
 
-plugin_id = "clock"
+plugin_id = "ai_text"
 plugin_settings = {
-    "selectedClockFace": "Digital Clock"
+    "title": "Today In History",
+    "textModel": "gpt-4o",
+    "textPrompt": "idk",
+    "selectedFrame": "Rectangle"
 }
 
 mock_device_config = MagicMock()
@@ -35,7 +38,7 @@ plugin_instance = get_plugin_instance(plugin_config)
 total_height = sum([max(resolution) for resolution in RESOLUTIONS])
 total_width = max([max(resolution) for resolution in RESOLUTIONS]) * 2
 
-composite = Image.new('RGB', (total_width, total_height), color='white')
+composite = Image.new('RGB', (total_width, total_height), color='gray')
 y = 0
 for resolution in RESOLUTIONS:
     x = 0
@@ -49,7 +52,6 @@ for resolution in RESOLUTIONS:
         # post processing thats applied before being displayed
         img = change_orientation(img, orientation)
         img = resize_image(img, resolution, plugin_config.get('image_settings', []))
-
         # rotate the image again when pasting
         if orientation == "vertical":
             img = img.rotate(-90, expand=1)
