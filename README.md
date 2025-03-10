@@ -21,6 +21,7 @@ InkyPi is an open-source, customizable E-Ink display powered by a Raspberry Pi. 
 - Clock: Customizable clock faces for displaying time
 - AI Image: Generate images from text prompts using OpenAI's DALL·E 
 - AI Text: Display dynamic text content using OpenAI's GPT-4o text models
+- Weather: Display current weather conditions and multi-day forecasts with a customizable layout
 
 And additional plugins coming soon! For documentation on building custom plugins, see [Building InkyPi Plugins](./docs/building_plugins.md).
 
@@ -29,10 +30,10 @@ And additional plugins coming soon! For documentation on building custom plugins
 - Raspberry Pi (4 | 3 | Zero 2 W)
     - Recommended to get 40 pin Pre Soldered Header
 - MicroSD Card (min 8 GB)
-- E-Ink Display: Pimoroni Inky Impression, available in 3 sizes:
-    - **[7.3 Inch Display](https://shop.pimoroni.com/products/inky-impression-7-3)**
-    - **[5.7 Inch Display](https://shop.pimoroni.com/products/inky-impression-5-7)**
-    - **[4 Inch Display](https://shop.pimoroni.com/products/inky-impression-4)**
+- E-Ink Display: Inky Impression from Pimoroni, available in 3 sizes (affiliate links)
+    - **[7.3 Inch Display](https://collabs.shop/q2jmza)**
+    - **[5.7 Inch Display](https://collabs.shop/ns6m6m)**
+    - **[4 Inch Display](https://collabs.shop/cpwtbh)**
 - Picture Frame or 3D Stand
 
 ## Installation
@@ -96,6 +97,8 @@ Check out the public [trello board](https://trello.com/b/SWJYWqe4/inkypi) to exp
 ## License
 
 Distributed under the GPL 3.0 License, see [LICENSE](./LICENSE) for more information.
+
+This project includes fonts and icons with separate licensing and attribution requirements. See [Attribution](./docs/attribution.md) for details.
 
 ## Issues
 

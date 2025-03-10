@@ -1,8 +1,11 @@
 import requests
 from PIL import Image
 from io import BytesIO
+import os
 import logging
 import hashlib
+import tempfile
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -58,3 +61,41 @@ def compute_image_hash(image):
     image = image.convert("RGB")
     img_bytes = image.tobytes()
     return hashlib.sha256(img_bytes).hexdigest()
+
+def take_screenshot_html(html_str, dimensions):
+    image = None
+    try:
+        # Create a temporary HTML file
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as html_file:
+            html_file.write(html_str.encode("utf-8"))
+            html_file_path = html_file.name
+
+        # Create a temporary output file for the screenshot
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as img_file:
+            img_file_path = img_file.name
+
+        command = [
+            "chromium-browser", html_file_path, "--headless=old",
+            f"--screenshot={img_file_path}", f'--window-size={dimensions[0]},{dimensions[1]}',
+            "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+            "--disable-dev-shm-usage", "--hide-scrollbars"
+        ]
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        # Check if the process failed or the output file is missing
+        if result.returncode != 0 or not os.path.exists(img_file_path):
+            logger.error("Failed to take screenshot:")
+            logger.error(result.stderr.decode('utf-8'))
+            return None
+
+        # Load the image using PIL
+        image = Image.open(img_file_path)
+
+        # Cleanup temp files
+        os.remove(html_file_path)
+        os.remove(img_file_path)
+
+    except Exception as e:
+        logger.error(f"Failed to take screenshot: {str(e)}")
+    
+    return image

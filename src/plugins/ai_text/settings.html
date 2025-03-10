@@ -1,11 +1,11 @@
 <div class="form-group">
-    <div class="form-group">
+    <div class="form-group nowrap">
         <label for="title" class="form-label">Title:</label>
         <input type="text" id="title" name="title" placeholder="Type something..." required class="form-input">
     </div>
 
     <!-- Text Model Dropdown -->
-    <div class="form-group">
+    <div class="form-group nowrap">
         <label for="textModel" class="form-label">Text Model:</label>
         <select id="textModel" name="textModel" class="form-input">
             <option value="gpt-4o-mini">GPT-4o mini</option>
@@ -19,117 +19,10 @@
     <input type="text" id="textPrompt" name="textPrompt" placeholder="Type something..." required class="form-input">
 </div>
 
-<div class="form-group">
-    <label for="selected-frame" class="form-label">Frame:</label>
-
-    <div id="frame-selection" class="image-grid">
-        {% for frame in frame_styles %}
-        <div
-            class="image-option"
-            data-face-name="{{ frame.name }}"
-            onclick="selectedFrame(this)"
-            {% if loop.index == 1 %} class="selected" {% endif %}
-        >
-            <img
-                src="{{ url_for('plugin.image', plugin_id='ai_text', filename=frame.icon) }}"
-                alt="{{ frame.name }}"
-            />
-        </div>
-        {% endfor %}
-    </div>
-    <input type="hidden" id="selected-frame" name="selectedFrame" value="{{ frame_styles[0].Name }}" />
-</div>
-
-<!-- Background Color Picker -->
-<div class="form-group">
-    <label class="form-label">Background:</label>
-    <div class="form-group">
-        <label>
-            <input type="radio" name="backgroundOption" value="color" checked>
-            Color
-        </label>
-        <input type="color" id="backgroundColor" name="backgroundColor" class="color-picker" value="#ffffff">
-    </div>
-    <div class="form-group">
-        <label>
-            <input type="radio" name="backgroundOption" value="image">
-            Image
-        </label>
-        <label for="imageUpload" class="form-input file-upload-label" id="uploadButtonLabel">Upload Image</label>
-        <input type="file" clear-on-submit id="imageUpload" name="backgroundImageFile" accept="image/*" class="file-upload-input" onchange="showFileName()">
-        <div id="fileName" class="file-name" style="display: none;">
-            <span id="fileNameText"></span>
-            <button type="button" id="removeFileButton" class="remove-file-btn" onclick="removeFile()">X</button>
-        </div>
-    </div>
-</div>
-
-<!-- Hidden input fields to store existing file data -->
-<div id="hiddenFileInput"></div>
-
-<!-- Text Color Picker -->
-<div class="form-group">
-    <label for="textColor" class="form-label">Text Color:</label>
-    <input type="color" id="textColor" name="textColor" class="color-picker" value="#000000">
-</div>
-
 <script>
-    function showFileName() {
-        const fileInput = document.getElementById('imageUpload');
-        const fileNameDisplay = document.getElementById('fileName');
-        const fileNameText = document.getElementById('fileNameText');
-        const uploadButtonLabel = document.getElementById('uploadButtonLabel');
-        const removeFileButton = document.getElementById('removeFileButton');
-        const file = fileInput.files[0];
-
-        if (file) {
-            fileNameText.textContent = `${file.name}`;
-            fileNameDisplay.style.display = 'flex';  // Show the file name and remove button
-            uploadButtonLabel.style.display = 'none';  // Hide the upload button label
-        } else {
-            fileNameDisplay.style.display = 'none';  // Hide if no file is selected
-            uploadButtonLabel.style.display = 'block';  // Show the upload button label
-        }
-    }
-
-    function removeFile() {
-        const fileInput = document.getElementById('imageUpload');
-        const fileNameDisplay = document.getElementById('fileName');
-        const uploadButtonLabel = document.getElementById('uploadButtonLabel');
-
-        fileInput.value = '';  // Clear the file input
-        fileNameDisplay.style.display = 'none';  // Hide the file name and remove button
-        uploadButtonLabel.style.display = 'block';  // Show the upload button label
-
-        const hiddenElement = document.getElementById(`hidden-file-name`);
-        if (hiddenElement) {
-            hiddenElement.remove();
-        }
-    }
-</script>
-
-
-<script>
-    function selectedFrame(element) {
-        // Remove the selected class from any previously selected option
-        const previousSelection = document.querySelector('.image-option.selected');
-        if (previousSelection) {
-            previousSelection.classList.remove('selected');
-        }
-
-        // Add the selected class to the clicked option
-        element.classList.add('selected');
-
-        // Update the hidden input with the selected frame
-        const selectedFaceName = element.getAttribute('data-face-name');
-        document.getElementById('selected-frame').value = selectedFaceName;
-    }
 
     // populate form values from plugin settings
     document.addEventListener('DOMContentLoaded', () => {        
-        // default to first frame option
-        let selectedFrameOption = document.querySelector('.image-option');
-
         if (loadPluginSettings) {
             // Populate text inputs
             document.getElementById('title').value = pluginSettings.title || '';
@@ -137,54 +30,6 @@
             
             // Populate text model
             document.getElementById('textModel').value = pluginSettings.textModel;
-
-            // Set background color
-            if (pluginSettings.backgroundColor) {
-                document.getElementById('backgroundColor').value = pluginSettings.backgroundColor;
-            }
-
-            // Populate text color
-            if (pluginSettings.textColor) {
-                document.getElementById('textColor').value = pluginSettings.textColor;
-            }
-
-            // Populate background options (color or image)
-            if (pluginSettings.backgroundOption) {
-                document.querySelector(`input[name="backgroundOption"][value="${pluginSettings.backgroundOption}"]`).checked = true;
-            }
-            // Handle background image selection
-            const fileNameDisplay = document.getElementById('fileName');
-            const fileNameText = document.getElementById('fileNameText');
-            const uploadButtonLabel = document.getElementById('uploadButtonLabel');
-
-            if (pluginSettings.backgroundImageFile) {
-                const filePath = pluginSettings.backgroundImageFile
-                const fileName = filePath.split('/').pop();
-
-                // display the file name
-                fileNameText.textContent = fileName;
-                fileNameDisplay.style.display = 'flex';
-                uploadButtonLabel.style.display = 'none';
-
-                // create a hidden input for the existing file
-                const hiddenInput = document.createElement("input");
-                hiddenInput.type = "hidden";
-                hiddenInput.name = "backgroundImageFile";
-                hiddenInput.value = filePath;
-                hiddenInput.id = `hidden-file-name`;
-                hiddenInput.setAttribute('delete-on-submit', '');
-                document.getElementById("hiddenFileInput").appendChild(hiddenInput);
-            } else {
-                fileNameDisplay.style.display = 'none';
-                uploadButtonLabel.style.display = 'block';
-            }
-
-            selectedFrameOption = document.querySelector(`.image-option[data-face-name="${pluginSettings.selectedFrame}"]`);
-        }
-
-        if (selectedFrameOption) {
-            selectedFrameOption.classList.add('selected');
-            document.getElementById('selected-frame').value = selectedFrameOption.getAttribute('data-face-name');
         }
     });
 </script>
