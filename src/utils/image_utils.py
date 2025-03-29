@@ -62,7 +62,7 @@ def compute_image_hash(image):
     img_bytes = image.tobytes()
     return hashlib.sha256(img_bytes).hexdigest()
 
-def take_screenshot_html(html_str, dimensions):
+def take_screenshot_html(html_str, dimensions, timeout_ms=None):
     image = None
     try:
         # Create a temporary HTML file
@@ -70,16 +70,31 @@ def take_screenshot_html(html_str, dimensions):
             html_file.write(html_str.encode("utf-8"))
             html_file_path = html_file.name
 
+        image = take_screenshot(html_file_path, dimensions, timeout_ms)
+
+        # Remove html file
+        os.remove(html_file_path)
+
+    except Exception as e:
+        logger.error(f"Failed to take screenshot: {str(e)}")
+
+    return image
+
+def take_screenshot(target, dimensions, timeout_ms=None):
+    image = None
+    try:
         # Create a temporary output file for the screenshot
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as img_file:
             img_file_path = img_file.name
 
         command = [
-            "chromium-browser", html_file_path, "--headless=old",
+            "chromium-browser", target, "--headless=old",
             f"--screenshot={img_file_path}", f'--window-size={dimensions[0]},{dimensions[1]}',
             "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
             "--disable-dev-shm-usage", "--hide-scrollbars"
         ]
+        if timeout_ms:
+            command.append(f"--timeout={timeout_ms}")
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         # Check if the process failed or the output file is missing
@@ -91,8 +106,7 @@ def take_screenshot_html(html_str, dimensions):
         # Load the image using PIL
         image = Image.open(img_file_path)
 
-        # Cleanup temp files
-        os.remove(html_file_path)
+        # Remove image files
         os.remove(img_file_path)
 
     except Exception as e:
