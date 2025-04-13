@@ -88,7 +88,7 @@ def take_screenshot(target, dimensions, timeout_ms=None):
             img_file_path = img_file.name
 
         command = [
-            "chromium-browser", target, "--headless=old",
+            "chromium-headless-shell", target, "--headless",
             f"--screenshot={img_file_path}", f'--window-size={dimensions[0]},{dimensions[1]}',
             "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
             "--disable-dev-shm-usage", "--hide-scrollbars"
