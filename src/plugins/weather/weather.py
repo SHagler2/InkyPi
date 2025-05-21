@@ -56,9 +56,13 @@ class Weather(BasePlugin):
         if not units or units not in ['metric', 'imperial', 'standard']:
             raise RuntimeError("Units are required.")
 
-        weather_data = self.get_weather_data(api_key, units, lat, long)
-        aqi_data = self.get_air_quality(api_key, lat, long)
-        location_data = self.get_location(api_key, lat, long)
+        try:
+            weather_data = self.get_weather_data(api_key, units, lat, long)
+            aqi_data = self.get_air_quality(api_key, lat, long)
+            location_data = self.get_location(api_key, lat, long)
+        except Exception as e:
+            logger.error(f"Failed to make OpenWeatherMap request: {str(e)}")
+            raise RuntimeError("OpenWeatherMap request failure, please check logs.")
 
         dimensions = device_config.get_resolution()
         if device_config.get_config("orientation") == "vertical":
@@ -173,24 +177,30 @@ class Weather(BasePlugin):
 
     def parse_data_points(self, weather, air_quality, tz, units):
         data_points = []
-
         sunrise_epoch = weather.get('current', {}).get("sunrise")
-        sunrise_dt = datetime.fromtimestamp(sunrise_epoch, tz=timezone.utc).astimezone(tz)
-        data_points.append({
-            "label": "Sunrise",
-            "measurement": sunrise_dt.strftime('%I:%M').lstrip("0"),
-            "unit": sunrise_dt.strftime('%p'),
-            "icon": self.get_plugin_dir('icons/sunrise.png')
-        })
+
+        if sunrise_epoch:
+            sunrise_dt = datetime.fromtimestamp(sunrise_epoch, tz=timezone.utc).astimezone(tz)
+            data_points.append({
+                "label": "Sunrise",
+                "measurement": sunrise_dt.strftime('%I:%M').lstrip("0"),
+                "unit": sunrise_dt.strftime('%p'),
+                "icon": self.get_plugin_dir('icons/sunrise.png')
+            })
+        else:
+            logging.error(f"Sunrise not found in OpenWeatherMap response, this is expected for polar areas in midnight sun and polar night periods.")
 
         sunset_epoch = weather.get('current', {}).get("sunset")
-        sunset_dt = datetime.fromtimestamp(sunset_epoch, tz=timezone.utc).astimezone(tz)
-        data_points.append({
-            "label": "Sunset",
-            "measurement": sunset_dt.strftime('%I:%M').lstrip("0"),
-            "unit": sunset_dt.strftime('%p'),
-            "icon": self.get_plugin_dir('icons/sunset.png')
-        })
+        if sunset_epoch:
+            sunset_dt = datetime.fromtimestamp(sunset_epoch, tz=timezone.utc).astimezone(tz)
+            data_points.append({
+                "label": "Sunset",
+                "measurement": sunset_dt.strftime('%I:%M').lstrip("0"),
+                "unit": sunset_dt.strftime('%p'),
+                "icon": self.get_plugin_dir('icons/sunset.png')
+            })
+        else:
+            logging.error(f"Sunset not found in OpenWeatherMap response, this is expected for polar areas in midnight sun and polar night periods.")
 
         data_points.append({
             "label": "Wind",
