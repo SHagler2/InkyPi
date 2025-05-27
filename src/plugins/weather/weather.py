@@ -71,8 +71,12 @@ class Weather(BasePlugin):
         timezone = device_config.get_config("timezone", default="America/New_York")
         tz = pytz.timezone(timezone)
         template_params = self.parse_weather_data(weather_data, aqi_data, location_data, tz, units)
-
         template_params["plugin_settings"] = settings
+
+        # Add last refresh time
+        now = datetime.now(tz)
+        last_refresh_time = now.strftime("%Y-%m-%d %I:%M %p")
+        template_params["last_refresh_time"] = last_refresh_time
 
         image = self.render_image(dimensions, "weather.html", "weather.css", template_params)
 
@@ -277,3 +281,4 @@ class Weather(BasePlugin):
             raise RuntimeError("Failed to retrieve location.")
 
         return response.json()[0]
+  
