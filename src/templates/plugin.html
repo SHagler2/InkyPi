@@ -172,10 +172,16 @@
                 return;
             }
             if (loadPluginSettings) {
-                if (pluginSettings.margin) {
+                if (pluginSettings.topMargin) {
                     document.getElementById('topMargin').value = pluginSettings.topMargin;
+                }
+                if (pluginSettings.bottomMargin) {
                     document.getElementById('bottomMargin').value = pluginSettings.bottomMargin;
+                }
+                if (pluginSettings.leftMargin) {
                     document.getElementById('leftMargin').value = pluginSettings.leftMargin;
+                }
+                if (pluginSettings.rightMargin) {
                     document.getElementById('rightMargin').value = pluginSettings.rightMargin;
                 }
                 // Populate background options (color or image)
