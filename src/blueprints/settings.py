@@ -1,8 +1,12 @@
-from flask import Blueprint, request, jsonify, current_app, render_template
+from flask import Blueprint, request, jsonify, current_app, render_template, Response
+from cysystemd.reader import JournalReader, JournalOpenMode, Rule
 from utils.time_utils import calculate_seconds
+from datetime import datetime, timedelta
 import os
 import pytz
 import logging
+import io
+
 
 logger = logging.getLogger(__name__)
 settings_bp = Blueprint("settings", __name__)
@@ -64,3 +68,40 @@ def shutdown():
         logger.info("Shutdown requested")
         os.system("sudo shutdown -h now")
     return jsonify({"success": True})
+
+@settings_bp.route('/download-logs')
+def download_logs():
+    try:
+        buffer = io.StringIO()
+        since = datetime.now() - timedelta(hours=2)
+
+        reader = JournalReader()
+        reader.open(JournalOpenMode.SYSTEM)
+        reader.add_filter(Rule("_SYSTEMD_UNIT", "inkypi.service"))
+        reader.seek_realtime_usec(int(since.timestamp() * 1_000_000))
+
+        for record in reader:
+            try:
+                ts = datetime.fromtimestamp(record.get_realtime_usec() / 1_000_000)
+                formatted_ts = ts.strftime("%b %d %H:%M:%S")
+            except Exception:
+                formatted_ts = "??? ?? ??:??:??"
+
+            data = record.data
+            hostname = data.get("_HOSTNAME", "unknown-host")
+            identifier = data.get("SYSLOG_IDENTIFIER") or data.get("_COMM", "?")
+            pid = data.get("_PID", "?")
+            msg = data.get("MESSAGE", "").rstrip()
+
+            buffer.write(f"{formatted_ts} {hostname} {identifier}[{pid}]: {msg}\n")
+
+        buffer.seek(0)
+        return Response(
+            buffer.read(),
+            mimetype="text/plain",
+            headers={"Content-Disposition": "attachment; filename=inkypi.log"}
+        )
+
+    except Exception as e:
+        return Response(f"Error reading logs: {e}", status=500, mimetype="text/plain")
+
