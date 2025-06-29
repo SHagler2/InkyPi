@@ -73,7 +73,14 @@ def shutdown():
 def download_logs():
     try:
         buffer = io.StringIO()
-        since = datetime.now() - timedelta(hours=2)
+        
+        # Get 'hours' from query parameters, default to 2 if not provided or invalid
+        hours_str = request.args.get('hours', '2')
+        try:
+            hours = int(hours_str)
+        except ValueError:
+            hours = 2
+        since = datetime.now() - timedelta(hours=hours)
 
         reader = JournalReader()
         reader.open(JournalOpenMode.SYSTEM)
@@ -93,13 +100,17 @@ def download_logs():
             pid = data.get("_PID", "?")
             msg = data.get("MESSAGE", "").rstrip()
 
+            # Format the log entry similar to the journalctl default output
             buffer.write(f"{formatted_ts} {hostname} {identifier}[{pid}]: {msg}\n")
 
         buffer.seek(0)
+        # Add date and time to the filename
+        now_str = datetime.now().strftime("%Y%m%d-%H%M%S")
+        filename = f"inkypi_{now_str}.log"
         return Response(
             buffer.read(),
             mimetype="text/plain",
-            headers={"Content-Disposition": "attachment; filename=inkypi.log"}
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
 
     except Exception as e:
