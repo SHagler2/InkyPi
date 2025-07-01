@@ -121,5 +121,6 @@ def download_logs():
         )
 
     except Exception as e:
+        logger.error(f"Error reading logs: {e}")
         return Response(f"Error reading logs: {e}", status=500, mimetype="text/plain")
 
