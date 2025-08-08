@@ -1,5 +1,5 @@
 from plugins.base_plugin.base_plugin import BasePlugin
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFilter
 from io import BytesIO
 import logging
 import os
@@ -21,12 +21,19 @@ def list_files_in_folder(folder_path):
         )
     ]
 
-def grab_image(image_path, dimensions):
+def grab_image(image_path, dimensions, pad_image):
     """Load an image from disk, auto-orient it, and resize to fit within the specified dimensions, preserving aspect ratio."""
     try:
         img = Image.open(image_path)
         img = ImageOps.exif_transpose(img)  # Correct orientation using EXIF
         img = ImageOps.contain(img, dimensions, Image.LANCZOS)
+
+        if pad_image:
+            bkg = ImageOps.fit(img, dimensions)
+            bkg = bkg.filter(ImageFilter.BoxBlur(8))
+            img_size = img.size
+            bkg.paste(img, ((dimensions[0] - img_size[0]) // 2, (dimensions[1] - img_size[1]) // 2))
+            img = bkg
         return img
     except Exception as e:
         logger.error(f"Error loading image from {image_path}: {e}")
@@ -35,6 +42,7 @@ def grab_image(image_path, dimensions):
 class ImageFolder(BasePlugin):
     def generate_image(self, settings, device_config):
         folder_path = settings.get('folder_path')
+        pad_image = settings.get('padImage', False)
         if not folder_path:
             raise RuntimeError("Folder path is required.")
         
@@ -58,7 +66,7 @@ class ImageFolder(BasePlugin):
 
         logger.info(f"Random image selected {image_url}")
 
-        image = grab_image(image_url, dimensions)
+        image = grab_image(image_url, dimensions, pad_image)
 
         if not image:
             raise RuntimeError("Failed to load image, please check logs.")
