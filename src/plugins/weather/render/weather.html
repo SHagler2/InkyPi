@@ -85,7 +85,7 @@
     // Extract hourly temperature and labels from template variables
     const labels = [{% for hour in hourly_forecast %}"{{ hour.time }}"{% if not loop.last %}, {% endif %}{% endfor %}];
     const temperatures = [{% for hour in hourly_forecast %}{{ hour.temperature }}{% if not loop.last %}, {% endif %}{% endfor %}];
-    const precipitation = [{% for hour in hourly_forecast %}{{ hour.precipitiation * 100}}{% if not loop.last %}, {% endif %}{% endfor %}]; // Convert to percentage
+    const precipitation = [{% for hour in hourly_forecast %}{{ hour.precipitation * 100}}{% if not loop.last %}, {% endif %}{% endfor %}]; // Convert to percentage
 
     // Find min and max temperatures
     const minTemp = Math.min(...temperatures);

@@ -280,7 +280,12 @@ class Weather(BasePlugin):
                 phase_raw = moon.get("Phase", "New Moon")
                 illum_pct = float(moon.get("Illumination", 0)) * 100
                 phase_name = phase_raw.lower().replace(" ", "")
-                phase_name = "newmoon" if phase_name == "darkmoon" else phase_name
+                if phase_name == "darkmoon":
+                    phase_name = "newmoon"
+                elif phase_name in ("3rdquarter", "thirdquarter"):
+                    phase_name = "lastquarter"
+                elif phase_name in ("1stquarter", "firstquarter"):
+                    phase_name = "firstquarter"
             except Exception:
                 illum_pct = 0
                 phase_name = "newmoon"
@@ -305,7 +310,7 @@ class Weather(BasePlugin):
             hour_forecast = {
                 "time": self.format_time(dt, time_format, hour_only=True),
                 "temperature": int(hour.get("temp")),
-                "precipitiation": hour.get("pop")
+                "precipitation": hour.get("pop")
             }
             hourly.append(hour_forecast)
         return hourly
@@ -339,7 +344,7 @@ class Weather(BasePlugin):
             hour_forecast = {
                 "time": self.format_time(dt, time_format, True),
                 "temperature": int(sliced_temperatures[i]) if i < len(sliced_temperatures) else 0,
-                "precipitiation": (sliced_precipitation_probabilities[i] / 100) if i < len(sliced_precipitation_probabilities) else 0
+                "precipitation": (sliced_precipitation_probabilities[i] / 100) if i < len(sliced_precipitation_probabilities) else 0
             }
             hourly.append(hour_forecast)
         return hourly
