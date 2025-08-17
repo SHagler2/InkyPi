@@ -31,7 +31,7 @@ AIR_QUALITY_URL = "http://api.openweathermap.org/data/2.5/air_pollution?lat={lat
 GEOCODING_URL = "http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={long}&limit=1&appid={api_key}"
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={long}&hourly=temperature_2m,precipitation_probability,relative_humidity_2m,surface_pressure,visibility&daily=weathercode,temperature_2m_max,temperature_2m_min,sunrise,sunset&current_weather=true&timezone=auto&models=best_match&forecast_days={forecast_days}"
-OPEN_METEO_AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={long}&hourly=pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,aerosol_optical_depth,uv_index,uv_index_clear_sky&timezone=auto"
+OPEN_METEO_AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={long}&hourly=european_aqi,uv_index,uv_index_clear_sky&timezone=auto"
 OPEN_METEO_UNIT_PARAMS = {
     "standard": "temperature_unit=kelvin&wind_speed_unit=ms&precipitation_unit=mm",
     "metric":   "temperature_unit=celsius&wind_speed_unit=ms&precipitation_unit=mm",
@@ -546,21 +546,24 @@ class Weather(BasePlugin):
             "icon": self.get_plugin_dir('icons/visibility.png')
         })
 
-        # Air Quality (PM2.5)
-        pm25_hourly_times = aqi_data.get('hourly', {}).get('time', [])
-        pm25_values = aqi_data.get('hourly', {}).get('pm2_5', [])
-        current_pm25 = "N/A"
-        for i, time_str in enumerate(pm25_hourly_times):
+        # Air Quality
+        aqi_hourly_times = aqi_data.get('hourly', {}).get('time', [])
+        aqi_values = aqi_data.get('hourly', {}).get('european_aqi', [])
+        current_aqi = "N/A"
+        for i, time_str in enumerate(aqi_hourly_times):
             try:
                 if datetime.fromisoformat(time_str).astimezone(tz).hour == current_time.hour:
-                    current_pm25 = round(pm25_values[i], 1)
+                    current_aqi = round(aqi_values[i], 1)
                     break
             except ValueError:
-                logger.warning(f"Could not parse time string {time_str} for PM2.5.")
+                logger.warning(f"Could not parse time string {time_str} for AQI.")
                 continue
+        scale = ""
+        if current_aqi:
+            scale = ["Good","Fair","Moderate","Poor","Very Poor","Ext Poor"][min(current_aqi//20,5)]
         data_points.append({
-            "label": "Air Quality (PM2.5)", "measurement": current_pm25,
-            "unit": 'µg/m³', "icon": self.get_plugin_dir('icons/aqi.png')
+            "label": "Air Quality", "measurement": current_aqi,
+            "unit": scale, "icon": self.get_plugin_dir('icons/aqi.png')
         })
 
         return data_points
