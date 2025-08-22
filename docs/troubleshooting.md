@@ -138,6 +138,13 @@ curl -L -O https://raw.githubusercontent.com/waveshareteam/e-Paper/refs/heads/ma
 curl -L -O https://raw.githubusercontent.com/waveshareteam/e-Paper/refs/heads/master/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib/epdconfig.py
 ```
 
+Additionally, we need the DEV_config-file
+
+for Pi Zero 2 W the file is:
+```bash
+curl -L -O https://raw.githubusercontent.com/waveshareteam/e-Paper/refs/heads/master/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib/DEV_Config_64_b.so
+```
+
 Once the files are in place, rerun the installation script. The script will detect the driver locally and skip the download step.
 
 ## Today's Newspaper not found
