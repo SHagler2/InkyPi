@@ -23,7 +23,6 @@ python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 3. Install dependencies and run
-pip install -r install/requirements.txt
 pip install -r install/requirements-dev.txt
 python src/inkypi.py --dev
 ```
