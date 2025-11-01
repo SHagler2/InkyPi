@@ -245,12 +245,8 @@ class Playlist:
             end = datetime.strptime("00:00", "%H:%M")
             end += timedelta(days=1)
 
-        # If start and end are the exact same time, duration is 0
-        if end.time() == start.time():
-            return 0
-
         # If the window wraps past midnight (EG: 21:00 -> 03:00), treat end as next day
-        if end <= start:
+        if end < start:
             end += timedelta(days=1)
             
         return int((end - start).total_seconds() // 60)

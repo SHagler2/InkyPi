@@ -38,6 +38,11 @@ class TestPlaylist:
             ("00:00", "06:00", "00:00", True, 360),   # start at midnight
             ("00:00", "06:00", "05:59", True, 360),   # before end
             ("00:00", "06:00", "06:00", False, 360),  # exactly at end
+
+            # --- All day 00:00 <-> 24:00 ---
+            ("00:00", "24:00", "00:00", True, 1440),   # exactly at start
+            ("00:00", "24:00", "10:00", True, 1440),   # during
+            ("00:00", "24:00", "24:00", False, 1440),  # exactly at end
         ]
     )
     def test_is_active_and_priority(self, start, end, current, expected, priority):
