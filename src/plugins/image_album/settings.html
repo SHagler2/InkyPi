@@ -47,12 +47,15 @@
 <script>
     // populate form values from plugin settings
     document.addEventListener('DOMContentLoaded', () => {
+        let backgroundOption = "blur"
         if (loadPluginSettings) {
             document.getElementById('url').value = pluginSettings.url;
             document.getElementById('album').value = pluginSettings.album;
             document.getElementById('padImage').checked = pluginSettings.padImage == 'false';
             document.getElementById('randomize').checked = pluginSettings.randomize;
             document.getElementById('backgroundColor').value = pluginSettings.backgroundColor;
+            backgroundOption = pluginSettings.backgroundOption || 'blur'
         }
+        document.querySelector(`input[name="backgroundOption"][value="${backgroundOption}"]`).checked = true;
     });
 </script>
