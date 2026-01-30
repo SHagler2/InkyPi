@@ -350,7 +350,7 @@ class Weather(BasePlugin):
 
             timestamp = int(dt.replace(hour=12, minute=0, second=0).timestamp())
             target_date: date = dt.date() + timedelta(days=1)
-           
+
             try:
                 phase_age = moon.phase(target_date)
                 phase_name_north_hemi = get_moon_phase_name(phase_age)
@@ -360,7 +360,7 @@ class Weather(BasePlugin):
             except Exception as e:
                 logger.error(f"Error calculating moon phase for {target_date}: {e}")
                 illum_pct = 0
-                phase_name = "newmoon"
+                phase_name_north_hemi = "newmoon"
             moon_icon_path = self.get_moon_phase_icon_path(phase_name_north_hemi, lat)
 
             forecast.append({
@@ -479,7 +479,7 @@ class Weather(BasePlugin):
                 "icon": self.get_plugin_dir('icons/sunrise.png')
             })
         else:
-            logging.error(f"Sunrise not found in OpenWeatherMap response, this is expected for polar areas in midnight sun and polar night periods.")
+            logger.error(f"Sunrise not found in OpenWeatherMap response, this is expected for polar areas in midnight sun and polar night periods.")
 
         sunset_epoch = weather.get('current', {}).get("sunset")
         if sunset_epoch:
@@ -491,7 +491,7 @@ class Weather(BasePlugin):
                 "icon": self.get_plugin_dir('icons/sunset.png')
             })
         else:
-            logging.error(f"Sunset not found in OpenWeatherMap response, this is expected for polar areas in midnight sun and polar night periods.")
+            logger.error(f"Sunset not found in OpenWeatherMap response, this is expected for polar areas in midnight sun and polar night periods.")
 
         wind_deg = weather.get('current', {}).get("wind_deg", 0)
         wind_arrow = self.get_wind_arrow(wind_deg)
@@ -573,7 +573,7 @@ class Weather(BasePlugin):
                 "icon": self.get_plugin_dir('icons/sunrise.png')
             })
         else:
-            logging.error(f"Sunrise not found in Open-Meteo response, this is expected for polar areas in midnight sun and polar night periods.")
+            logger.error(f"Sunrise not found in Open-Meteo response, this is expected for polar areas in midnight sun and polar night periods.")
 
         # Sunset
         sunset_times = daily_data.get('sunset', [])
@@ -586,7 +586,7 @@ class Weather(BasePlugin):
                 "icon": self.get_plugin_dir('icons/sunset.png')
             })
         else:
-            logging.error(f"Sunset not found in Open-Meteo response, this is expected for polar areas in midnight sun and polar night periods.")
+            logger.error(f"Sunset not found in Open-Meteo response, this is expected for polar areas in midnight sun and polar night periods.")
 
         # Wind
         wind_speed = current_data.get("windspeed", 0)
@@ -691,7 +691,7 @@ class Weather(BasePlugin):
                 logger.warning(f"Could not parse time string {time_str} for AQI.")
                 continue
         scale = ""
-        if current_aqi:
+        if current_aqi and current_aqi != "N/A":
             scale = ["Good","Fair","Moderate","Poor","Very Poor","Ext Poor"][min(current_aqi//20,5)]
         data_points.append({
             "label": "Air Quality", "measurement": current_aqi,
@@ -723,7 +723,7 @@ class Weather(BasePlugin):
         url = WEATHER_URL.format(lat=lat, long=long, units=units, api_key=api_key)
         response = requests.get(url, timeout=30)
         if not 200 <= response.status_code < 300:
-            logging.error(f"Failed to retrieve weather data: {response.content}")
+            logger.error(f"Failed to retrieve weather data: {response.content}")
             raise RuntimeError("Failed to retrieve weather data.")
 
         return response.json()
@@ -733,7 +733,7 @@ class Weather(BasePlugin):
         response = requests.get(url, timeout=30)
 
         if not 200 <= response.status_code < 300:
-            logging.error(f"Failed to get air quality data: {response.content}")
+            logger.error(f"Failed to get air quality data: {response.content}")
             raise RuntimeError("Failed to retrieve air quality data.")
 
         return response.json()
@@ -743,7 +743,7 @@ class Weather(BasePlugin):
         response = requests.get(url, timeout=30)
 
         if not 200 <= response.status_code < 300:
-            logging.error(f"Failed to get location: {response.content}")
+            logger.error(f"Failed to get location: {response.content}")
             raise RuntimeError("Failed to retrieve location.")
 
         location_data = response.json()[0]
@@ -757,7 +757,7 @@ class Weather(BasePlugin):
         response = requests.get(url, timeout=30)
 
         if not 200 <= response.status_code < 300:
-            logging.error(f"Failed to retrieve Open-Meteo weather data: {response.content}")
+            logger.error(f"Failed to retrieve Open-Meteo weather data: {response.content}")
             raise RuntimeError("Failed to retrieve Open-Meteo weather data.")
         
         return response.json()
@@ -766,7 +766,7 @@ class Weather(BasePlugin):
         url = OPEN_METEO_AIR_QUALITY_URL.format(lat=lat, long=long)
         response = requests.get(url, timeout=30)
         if not 200 <= response.status_code < 300:
-            logging.error(f"Failed to retrieve Open-Meteo air quality data: {response.content}")
+            logger.error(f"Failed to retrieve Open-Meteo air quality data: {response.content}")
             raise RuntimeError("Failed to retrieve Open-Meteo air quality data.")
         
         return response.json()
