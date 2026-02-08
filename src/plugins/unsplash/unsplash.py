@@ -3,6 +3,7 @@ from utils.image_loader import _is_low_resource_device
 from utils.http_client import get_http_session
 import logging
 import random
+import requests  # For exception handling
 
 logger = logging.getLogger(__name__)
 
