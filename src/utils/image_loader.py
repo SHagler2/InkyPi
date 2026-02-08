@@ -144,6 +144,23 @@ class AdaptiveImageLoader:
             logger.error(f"Error loading image from BytesIO: {e}")
             return None
 
+    def resize_image(self, img, dimensions, fit_mode='fit'):
+        """
+        Resize an already-loaded PIL Image to target dimensions.
+
+        Args:
+            img: PIL Image object
+            dimensions: Target dimensions as (width, height)
+            fit_mode: 'fill' (crop to fill) or 'fit' (letterbox to fit, default)
+
+        Returns:
+            PIL Image object resized to dimensions
+        """
+        logger.debug(f"Resizing image from {img.size[0]}x{img.size[1]} to {dimensions[0]}x{dimensions[1]} (fit_mode={fit_mode})")
+
+        original_size = img.size
+        return self._process_and_resize(img, dimensions, original_size, fit_mode)
+
     # ========== LOW-RESOURCE IMPLEMENTATIONS ==========
 
     def _load_from_url_lowmem(self, url, dimensions, timeout_ms, resize, headers=None, fit_mode='fill'):

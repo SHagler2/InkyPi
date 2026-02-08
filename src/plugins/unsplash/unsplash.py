@@ -95,8 +95,12 @@ class Unsplash(BasePlugin):
 
         logger.info(f"Fetching image (size: {image_size}): {image_url}")
 
+        # Get fit mode setting (default to 'fit' for letterbox)
+        fit_mode = settings.get("fitMode", "fit")
+        logger.debug(f"Fit mode: {fit_mode}")
+
         # Use adaptive image loader for memory-efficient processing
-        image = self.image_loader.from_url(image_url, dimensions, timeout_ms=40000)
+        image = self.image_loader.from_url(image_url, dimensions, timeout_ms=40000, fit_mode=fit_mode)
 
         if not image:
             logger.error("Failed to load and process image")

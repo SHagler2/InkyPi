@@ -20,8 +20,12 @@ class ImageURL(BasePlugin):
         logger.info(f"Fetching image from URL: {url}")
         logger.debug(f"Target dimensions: {dimensions[0]}x{dimensions[1]}")
 
+        # Get fit mode setting (default to 'fit' for letterbox)
+        fit_mode = settings.get("fitMode", "fit")
+        logger.debug(f"Fit mode: {fit_mode}")
+
         # Use adaptive image loader for memory-efficient processing
-        image = self.image_loader.from_url(url, dimensions, timeout_ms=40000)
+        image = self.image_loader.from_url(url, dimensions, timeout_ms=40000, fit_mode=fit_mode)
 
         if not image:
             logger.error("Failed to load image from URL")

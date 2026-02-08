@@ -71,6 +71,17 @@ class AIImage(BasePlugin):
             if image:
                 logger.info(f"AI image generated successfully: {image.size[0]}x{image.size[1]}")
 
+                # Resize to display dimensions with letterboxing
+                dimensions = device_config.get_resolution()
+                if orientation == "vertical":
+                    dimensions = dimensions[::-1]
+
+                # Get fit mode setting (default to 'fit' for letterbox)
+                fit_mode = settings.get("fitMode", "fit")
+                logger.debug(f"Resizing to {dimensions} with fit_mode={fit_mode}")
+
+                image = self.image_loader.resize_image(image, dimensions, fit_mode=fit_mode)
+
         except Exception as e:
             logger.error(f"Failed to make OpenAI request: {str(e)}")
             raise RuntimeError("Open AI request failure, please check logs.")
