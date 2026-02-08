@@ -26,40 +26,10 @@
 
     <script>
         const pluginSettings = {{ plugin_settings | tojson if plugin_settings else {} }};
-        const pluginInstanceName ='{{ plugin_instance }}';
-        const loadPluginSettings = pluginInstanceName != '';
+        const loadPluginSettings = Object.keys(pluginSettings).length > 0;
         const styleSettings = {{ style_settings | default(false) | tojson }};
-        const refreshSettings = {{ refresh_settings | tojson if refresh_settings else {} }};
 
         let uploadedFiles = {};
-
-        // Initialize refresh settings managers
-        let editRefreshManager = null;
-        {% if plugin_instance %}
-        editRefreshManager = createRefreshSettingsManager('refreshSettingsModal', 'edit');
-        {% endif %}
-
-        async function saveRefreshSettings() {
-            if (!editRefreshManager) return;
-
-            await editRefreshManager.submit(async (formData) => {
-                const data = new FormData();
-                data.append("plugin_id", "{{ plugin.id }}");
-                data.append("refresh_settings", JSON.stringify(formData));
-
-                const response = await fetch("{{ url_for('plugin.update_plugin_instance', instance_name='') }}" + pluginInstanceName, {
-                    method: 'PUT',
-                    body: data
-                });
-
-                const result = await response.json();
-                if (response.ok) {
-                    showResponseModal('success', `Success! ${result.message}`);
-                } else {
-                    throw new Error(result.error || 'Failed to update refresh settings');
-                }
-            });
-        }
 
         async function handleAction(action) {
             const loadingIndicator = document.getElementById('loadingIndicator');
@@ -83,18 +53,18 @@
                 }
             });
 
-            if (action == "add_to_playlist"){
-                url = '{{ url_for("playlist.add_plugin") }}';
-                const scheduleFormData = new FormData(scheduleForm);
-                const scheduleData = {};
-                for (const [key, value] of scheduleFormData.entries()) {
-                    scheduleData[key] = value;
-                }
-                formData.append("refresh_settings", JSON.stringify(scheduleData));
+            if (action == "add_to_loop"){
+                url = '{{ url_for("loops.add_plugin_to_loop") }}';
+                const loopFormData = new FormData(scheduleForm);
+                const interval = parseInt(loopFormData.get("refresh_interval"));
+                const unit = loopFormData.get("interval_unit");
+                let intervalSeconds = interval;
+                if (unit === "minutes") intervalSeconds = interval * 60;
+                else if (unit === "hours") intervalSeconds = interval * 3600;
+                else if (unit === "days") intervalSeconds = interval * 86400;
+                formData.append("loop_name", loopFormData.get("loop_name"));
+                formData.append("refresh_interval_seconds", intervalSeconds);
                 clearFormOnSubmit = true
-            } else if (action == "update_instance") {
-                url = "{{ url_for('plugin.update_plugin_instance', instance_name='') }}" + pluginInstanceName,
-                method = 'PUT'
             }
 
             // Send data to the server
@@ -119,7 +89,7 @@
                     document.querySelectorAll('[delete-on-submit]').forEach(div => {
                         div.remove();
                     });
-                    if (action == "add_to_playlist"){
+                    if (action == "add_to_loop"){
                         scheduleForm.reset()
                     }
                 }
@@ -300,9 +270,6 @@
                     <h1 class="app-title">{{ plugin.display_name }}</h1>
                     {% if api_key and api_key.required %}<span class="api-key-label" title="{{api_key.service}} (Set {{api_key.expected_key}} in .env)">Requires API Key</span>{% endif %}
                 </div>
-                {% if plugin_instance %}
-                    <button class="header-button" onclick="openModal('refreshSettingsModal')">Refresh Settings</button>
-                {% endif %}
             </div>
             <div id="loadingIndicator" class="loading-indicator"></div>
         </div>
@@ -403,13 +370,8 @@
             <input type="hidden" name="plugin_id" value="{{ plugin.id }}">
 
             <div class="buttons-container">
-                {% if plugin_instance %}
-                    <button type="button" onclick="handleAction('update_instance')" class="action-button">Save</button>
-                    <button type="button" onclick="openModal('scheduleModal')" class="action-button right">Save As...</button>
-                {% else %}
-                    <button type="button" onclick="handleAction()" class="action-button left">Update Now</button>
-                    <button type="button" onclick="openModal('scheduleModal')" class="action-button right">Add to Playlist</button>
-                {% endif %}
+                <button type="button" onclick="handleAction()" class="action-button left">Update Now</button>
+                <button type="button" onclick="openModal('scheduleModal')" class="action-button right">Add to Loop</button>
             </div>
         </form>
     </div>
@@ -417,50 +379,36 @@
     <!-- Success/Error Modal -->
     {% include 'response_modal.html' %}
 
-    <!-- Refresh Settings Modal (for editing existing instances) -->
-    {% if plugin_instance %}
-    <div id="refreshSettingsModal" class="modal">
-        <div class="modal-content">
-            <span class="close-button" onclick="closeModal('refreshSettingsModal')">×</span>
-            <h2>Refresh Settings</h2>
-            <div class="separator"></div>
-            <form id="refreshSettingsForm" class="settings-form">
-                {% set prefix = "edit" %}
-                {% include 'refresh_settings_form.html' %}
-            </form>
-            <div class="buttons-container">
-                <button type="button" onclick="saveRefreshSettings()" class="action-button">Save</button>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- Schedule Configuration Modal -->
+    <!-- Loop Configuration Modal -->
     <div id="scheduleModal" class="modal">
         <div class="modal-content">
             <span class="close-button" onclick="closeModal('scheduleModal')">×</span>
-            <h2>Add to Playlist</h2>
+            <h2>Add to Loop</h2>
             <div class="separator"></div>
             <form id="scheduleForm" class="settings-form">
                 <div class="form-group">
-                    <label for="playlist" class="form-label">Playlist:</label>
-                    <select id="playlist" name="playlist" class="form-input">
-                        {% for playlist_name in playlists %}
-                        <option value="{{playlist_name}}">{{playlist_name}}</option>
+                    <label for="loop_name" class="form-label">Loop:</label>
+                    <select id="loop_name" name="loop_name" class="form-input" required>
+                        {% for loop_name in loops %}
+                        <option value="{{loop_name}}">{{loop_name}}</option>
                         {% endfor %}
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="instance" class="form-label">Instance Name:</label>
-                    <input type="text" id="instance" name="instance_name" placeholder="Type something..." required class="form-input">
+                    <label for="refresh_interval" class="form-label">Refresh Interval:</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="number" id="refresh_interval" name="refresh_interval" min="1" value="30" required class="form-input" style="flex: 1;">
+                        <select id="interval_unit" name="interval_unit" class="form-input" style="flex: 0 0 120px;">
+                            <option value="minutes" selected>Minutes</option>
+                            <option value="hours">Hours</option>
+                            <option value="days">Days</option>
+                        </select>
+                    </div>
+                    <small style="color: var(--text-secondary);">How often to refresh this plugin's data</small>
                 </div>
-
-                {% set prefix = "add" %}
-                {% include 'refresh_settings_form.html' %}
-
             </form>
             <div class="buttons-container">
-                <button type="button" onclick="handleAction('add_to_playlist')" class="action-button">Save</button>
+                <button type="button" onclick="handleAction('add_to_loop')" class="action-button">Save</button>
             </div>
         </div>
     </div>

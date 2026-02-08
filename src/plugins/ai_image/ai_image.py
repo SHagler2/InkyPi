@@ -30,6 +30,9 @@ class AIImage(BasePlugin):
             logger.error("OpenAI API Key not configured")
             raise RuntimeError("OPEN AI API Key not configured.")
 
+        # Sanitize API key to ASCII (fixes copy/paste issues with special characters)
+        api_key = api_key.encode('ascii', errors='ignore').decode('ascii').strip()
+
         text_prompt = settings.get("textPrompt", "")
         image_model = settings.get('imageModel', DEFAULT_IMAGE_MODEL)
 
@@ -52,6 +55,8 @@ class AIImage(BasePlugin):
             if randomize_prompt:
                 logger.debug("Generating randomized prompt using GPT-4...")
                 text_prompt = AIImage.fetch_image_prompt(ai_client, text_prompt)
+                # Sanitize randomized prompt to ASCII
+                text_prompt = text_prompt.encode('ascii', errors='ignore').decode('ascii')
                 logger.info(f"Randomized prompt: '{text_prompt}'")
 
             logger.info(f"Generating image with {image_model}...")
@@ -77,6 +82,9 @@ class AIImage(BasePlugin):
         """
         Fetch image from OpenAI API. Now an instance method to access image_loader.
         """
+        # Sanitize prompt to ASCII to avoid httpx encoding errors
+        prompt = prompt.encode('ascii', errors='ignore').decode('ascii')
+
         logger.info(f"Generating image for prompt: {prompt}, model: {model}, quality: {quality}")
         prompt += (
             ". The image should fully occupy the entire canvas without any frames, "

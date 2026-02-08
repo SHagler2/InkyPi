@@ -28,8 +28,8 @@ from refresh_task import RefreshTask
 from blueprints.main import main_bp
 from blueprints.settings import settings_bp
 from blueprints.plugin import plugin_bp
-from blueprints.playlist import playlist_bp
 from blueprints.apikeys import apikeys_bp
+from blueprints.loops import loops_bp
 from jinja2 import ChoiceLoader, FileSystemLoader
 from plugins.plugin_registry import load_plugins
 from waitress import serve
@@ -78,8 +78,8 @@ app.config['MAX_FORM_PARTS'] = 10_000
 app.register_blueprint(main_bp)
 app.register_blueprint(settings_bp)
 app.register_blueprint(plugin_bp)
-app.register_blueprint(playlist_bp)
 app.register_blueprint(apikeys_bp)
+app.register_blueprint(loops_bp)
 
 # Register opener for HEIF/HEIC images
 register_heif_opener()
@@ -109,9 +109,12 @@ if __name__ == '__main__':
                 local_ip = s.getsockname()[0]
                 s.close()
                 logger.info(f"Serving on http://{local_ip}:{PORT}")
-            except:
+            except (OSError, socket.error):
                 pass  # Ignore if we can't get the IP
 
         serve(app, host="0.0.0.0", port=PORT, threads=1)
     finally:
         refresh_task.stop()
+        # Clean up HTTP session connection pool
+        from utils.http_client import close_http_session
+        close_http_session()

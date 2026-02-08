@@ -1,5 +1,5 @@
 import logging
-import requests
+from utils.http_client import get_http_session
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,8 @@ def fetch_stars(github_repository):
     url = f"https://api.github.com/repos/{github_repository}"
     headers = {"Accept": "application/json"}
 
-    response = requests.get(url, headers=headers, timeout=30)
+    session = get_http_session()
+    response = session.get(url, headers=headers, timeout=30)
     if response.status_code == 200:
         data = response.json()
     else:

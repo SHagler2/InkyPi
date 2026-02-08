@@ -60,7 +60,7 @@ class AdaptiveImageLoader:
     def __init__(self):
         self.is_low_resource = _is_low_resource_device()
 
-    def from_url(self, url, dimensions, timeout_ms=40000, resize=True, headers=None):
+    def from_url(self, url, dimensions, timeout_ms=40000, resize=True, headers=None, fit_mode='fill'):
         """
         Load an image from a URL and optionally resize it.
 
@@ -70,18 +70,19 @@ class AdaptiveImageLoader:
             timeout_ms: Request timeout in milliseconds
             resize: Whether to resize the image (default True)
             headers: Optional dict of HTTP headers to include in request
+            fit_mode: 'fill' (crop to fill, default) or 'fit' (letterbox to fit)
 
         Returns:
             PIL Image object resized to dimensions, or None on error
         """
-        logger.debug(f"Loading image from URL: {url}")
+        logger.debug(f"Loading image from URL: {url} (fit_mode={fit_mode})")
 
         if self.is_low_resource:
-            return self._load_from_url_lowmem(url, dimensions, timeout_ms, resize, headers)
+            return self._load_from_url_lowmem(url, dimensions, timeout_ms, resize, headers, fit_mode)
         else:
-            return self._load_from_url_fast(url, dimensions, timeout_ms, resize, headers)
+            return self._load_from_url_fast(url, dimensions, timeout_ms, resize, headers, fit_mode)
 
-    def from_file(self, path, dimensions, resize=True):
+    def from_file(self, path, dimensions, resize=True, fit_mode='fill'):
         """
         Load an image from a local file and optionally resize it.
 
@@ -89,11 +90,12 @@ class AdaptiveImageLoader:
             path: Path to local image file
             dimensions: Target dimensions as (width, height)
             resize: Whether to resize the image (default True)
+            fit_mode: 'fill' (crop to fill, default) or 'fit' (letterbox to fit)
 
         Returns:
             PIL Image object resized to dimensions, or None on error
         """
-        logger.debug(f"Loading image from file: {path}")
+        logger.debug(f"Loading image from file: {path} (fit_mode={fit_mode})")
 
         if not os.path.exists(path):
             logger.error(f"File not found: {path}")
@@ -101,14 +103,14 @@ class AdaptiveImageLoader:
 
         try:
             if self.is_low_resource:
-                return self._load_from_file_lowmem(path, dimensions, resize)
+                return self._load_from_file_lowmem(path, dimensions, resize, fit_mode)
             else:
-                return self._load_from_file_fast(path, dimensions, resize)
+                return self._load_from_file_fast(path, dimensions, resize, fit_mode)
         except Exception as e:
             logger.error(f"Error loading image from {path}: {e}")
             return None
 
-    def from_bytesio(self, data, dimensions, resize=True):
+    def from_bytesio(self, data, dimensions, resize=True, fit_mode='fill'):
         """
         Load an image from BytesIO object and optionally resize it.
 
@@ -116,11 +118,12 @@ class AdaptiveImageLoader:
             data: BytesIO object containing image data
             dimensions: Target dimensions as (width, height)
             resize: Whether to resize the image (default True)
+            fit_mode: 'fill' (crop to fill, default) or 'fit' (letterbox to fit)
 
         Returns:
             PIL Image object resized to dimensions, or None on error
         """
-        logger.debug("Loading image from BytesIO")
+        logger.debug(f"Loading image from BytesIO (fit_mode={fit_mode})")
 
         try:
             img = Image.open(data)
@@ -129,7 +132,7 @@ class AdaptiveImageLoader:
             logger.info(f"Loaded image: {original_size[0]}x{original_size[1]} ({img.mode} mode, {original_pixels/1_000_000:.1f}MP)")
 
             if resize:
-                img = self._process_and_resize(img, dimensions, original_size)
+                img = self._process_and_resize(img, dimensions, original_size, fit_mode)
             else:
                 # Even without resizing, apply EXIF orientation correction
                 img = ImageOps.exif_transpose(img)
@@ -143,7 +146,7 @@ class AdaptiveImageLoader:
 
     # ========== LOW-RESOURCE IMPLEMENTATIONS ==========
 
-    def _load_from_url_lowmem(self, url, dimensions, timeout_ms, resize, headers=None):
+    def _load_from_url_lowmem(self, url, dimensions, timeout_ms, resize, headers=None, fit_mode='fill'):
         """Low-memory URL loading using temp file + draft mode."""
         tmp_path = None
 
@@ -170,7 +173,7 @@ class AdaptiveImageLoader:
                 logger.debug(f"Downloaded {downloaded_bytes / 1024:.1f}KB to temp file")
 
             # Load from temp file with draft mode
-            return self._load_from_file_lowmem(tmp_path, dimensions, resize)
+            return self._load_from_file_lowmem(tmp_path, dimensions, resize, fit_mode)
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Error downloading image from {url}: {e}")
@@ -187,7 +190,7 @@ class AdaptiveImageLoader:
                 except Exception as e:
                     logger.warning(f"Could not delete temp file {tmp_path}: {e}")
 
-    def _load_from_file_lowmem(self, path, dimensions, resize):
+    def _load_from_file_lowmem(self, path, dimensions, resize, fit_mode='fill'):
         """Low-memory file loading using draft mode."""
         try:
             img = Image.open(path)
@@ -204,7 +207,7 @@ class AdaptiveImageLoader:
                 img.load()
                 logger.debug(f"Image decoded: {img.size[0]}x{img.size[1]} (draft mode reduced from {original_size[0]}x{original_size[1]})")
 
-                img = self._process_and_resize(img, dimensions, original_size)
+                img = self._process_and_resize(img, dimensions, original_size, fit_mode)
             else:
                 # Even without resizing, apply EXIF orientation correction
                 img = ImageOps.exif_transpose(img)
@@ -224,7 +227,7 @@ class AdaptiveImageLoader:
 
     # ========== HIGH-PERFORMANCE IMPLEMENTATIONS ==========
 
-    def _load_from_url_fast(self, url, dimensions, timeout_ms, resize, headers=None):
+    def _load_from_url_fast(self, url, dimensions, timeout_ms, resize, headers=None, fit_mode='fill'):
         """High-performance URL loading using in-memory processing."""
         try:
             logger.debug("Using in-memory processing (high-performance mode)")
@@ -242,7 +245,7 @@ class AdaptiveImageLoader:
             logger.info(f"Downloaded image: {original_size[0]}x{original_size[1]} ({img.mode} mode, {original_pixels/1_000_000:.1f}MP)")
 
             if resize:
-                img = self._process_and_resize(img, dimensions, original_size)
+                img = self._process_and_resize(img, dimensions, original_size, fit_mode)
             else:
                 # Even without resizing, apply EXIF orientation correction
                 img = ImageOps.exif_transpose(img)
@@ -258,7 +261,7 @@ class AdaptiveImageLoader:
             logger.error(f"Error processing image from {url}: {e}")
             return None
 
-    def _load_from_file_fast(self, path, dimensions, resize):
+    def _load_from_file_fast(self, path, dimensions, resize, fit_mode='fill'):
         """High-performance file loading using in-memory processing."""
         try:
             img = Image.open(path)
@@ -267,7 +270,7 @@ class AdaptiveImageLoader:
             logger.info(f"Loaded image: {original_size[0]}x{original_size[1]} ({img.mode} mode, {original_pixels/1_000_000:.1f}MP)")
 
             if resize:
-                img = self._process_and_resize(img, dimensions, original_size)
+                img = self._process_and_resize(img, dimensions, original_size, fit_mode)
             else:
                 # Even without resizing, apply EXIF orientation correction
                 img = ImageOps.exif_transpose(img)
@@ -282,7 +285,7 @@ class AdaptiveImageLoader:
 
     # ========== SHARED PROCESSING LOGIC ==========
 
-    def _process_and_resize(self, img, dimensions, original_size):
+    def _process_and_resize(self, img, dimensions, original_size, fit_mode='fill'):
         """
         Process and resize image with device-appropriate optimizations.
 
@@ -290,6 +293,7 @@ class AdaptiveImageLoader:
             img: PIL Image object
             dimensions: Target dimensions (width, height)
             original_size: Original image size for logging
+            fit_mode: 'fill' (crop to fill) or 'fit' (letterbox to fit)
 
         Returns:
             Processed and resized PIL Image
@@ -300,7 +304,7 @@ class AdaptiveImageLoader:
         img = ImageOps.exif_transpose(img)
         if img.size != original_size:
             logger.debug(f"EXIF orientation applied: {original_size[0]}x{original_size[1]} -> {img.size[0]}x{img.size[1]}")
-        
+
         # Convert to RGB if necessary (removes alpha channel, saves memory)
         # E-ink displays don't need alpha channel anyway
         if img.mode in ('RGBA', 'LA', 'P'):
@@ -309,16 +313,16 @@ class AdaptiveImageLoader:
 
         # Choose processing strategy based on device capabilities
         if self.is_low_resource:
-            img = self._resize_low_resource(img, dimensions)
+            img = self._resize_low_resource(img, dimensions, fit_mode)
         else:
-            img = self._resize_high_performance(img, dimensions)
+            img = self._resize_high_performance(img, dimensions, fit_mode)
 
-        logger.info(f"Image processing complete: {dimensions[0]}x{dimensions[1]}")
+        logger.info(f"Image processing complete: {dimensions[0]}x{dimensions[1]} ({fit_mode} mode)")
         return img
 
-    def _resize_low_resource(self, img, dimensions):
+    def _resize_low_resource(self, img, dimensions, fit_mode='fill'):
         """Memory-efficient resize for low-resource devices."""
-        logger.debug("Using memory-efficient processing (BICUBIC filter)")
+        logger.debug(f"Using memory-efficient processing (BICUBIC filter, {fit_mode} mode)")
 
         # For very large images, use two-stage resize
         if img.size[0] > dimensions[0] * 2 or img.size[1] > dimensions[1] * 2:
@@ -336,14 +340,32 @@ class AdaptiveImageLoader:
             logger.debug(f"Stage 1 complete: {img.size[0]}x{img.size[1]}")
             gc.collect()
 
-            # Stage 2: High-quality resize to exact dimensions
+            # Stage 2: Final resize to exact dimensions
             logger.debug(f"Stage 2: Final resize to {dimensions[0]}x{dimensions[1]} using LANCZOS")
-            img = ImageOps.fit(img, dimensions, method=Image.LANCZOS)
+            if fit_mode == 'fit':
+                # Letterbox mode: resize to fit, then add black bars
+                resized = ImageOps.contain(img, dimensions, method=Image.LANCZOS)
+                canvas = Image.new('RGB', dimensions, (0, 0, 0))
+                offset_x = (dimensions[0] - resized.size[0]) // 2
+                offset_y = (dimensions[1] - resized.size[1]) // 2
+                canvas.paste(resized, (offset_x, offset_y))
+                img = canvas
+            else:
+                img = ImageOps.fit(img, dimensions, method=Image.LANCZOS)
             logger.debug(f"Stage 2 complete: {dimensions[0]}x{dimensions[1]}")
         else:
             # Direct resize with BICUBIC (fast, sufficient quality for e-ink)
             logger.debug(f"Resizing directly from {img.size[0]}x{img.size[1]} to {dimensions[0]}x{dimensions[1]}")
-            img = ImageOps.fit(img, dimensions, method=Image.BICUBIC)
+            if fit_mode == 'fit':
+                # Letterbox mode: resize to fit, then add black bars
+                resized = ImageOps.contain(img, dimensions, method=Image.BICUBIC)
+                canvas = Image.new('RGB', dimensions, (0, 0, 0))
+                offset_x = (dimensions[0] - resized.size[0]) // 2
+                offset_y = (dimensions[1] - resized.size[1]) // 2
+                canvas.paste(resized, (offset_x, offset_y))
+                img = canvas
+            else:
+                img = ImageOps.fit(img, dimensions, method=Image.BICUBIC)
 
         # Explicit garbage collection
         gc.collect()
@@ -351,10 +373,27 @@ class AdaptiveImageLoader:
 
         return img
 
-    def _resize_high_performance(self, img, dimensions):
+    def _resize_high_performance(self, img, dimensions, fit_mode='fill'):
         """High-quality resize for powerful devices."""
-        logger.debug("Using high-quality processing (LANCZOS filter)")
+        logger.debug(f"Using high-quality processing (LANCZOS filter, {fit_mode} mode)")
         logger.debug(f"Resizing from {img.size[0]}x{img.size[1]} to {dimensions[0]}x{dimensions[1]}")
 
-        return ImageOps.fit(img, dimensions, method=Image.LANCZOS)
+        if fit_mode == 'fit':
+            # Letterbox mode: resize to fit within dimensions, then add black bars
+            resized = ImageOps.contain(img, dimensions, method=Image.LANCZOS)
+
+            # Create black canvas at target dimensions
+            canvas = Image.new('RGB', dimensions, (0, 0, 0))
+
+            # Calculate position to center the image
+            offset_x = (dimensions[0] - resized.size[0]) // 2
+            offset_y = (dimensions[1] - resized.size[1]) // 2
+
+            # Paste resized image onto canvas
+            canvas.paste(resized, (offset_x, offset_y))
+
+            logger.debug(f"Letterboxed: resized to {resized.size[0]}x{resized.size[1]}, centered on {dimensions[0]}x{dimensions[1]} canvas")
+            return canvas
+        else:
+            return ImageOps.fit(img, dimensions, method=Image.LANCZOS)
 

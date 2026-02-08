@@ -47,63 +47,194 @@
             }
         }
 
+        // Countdown timer
+        let countdownSeconds = -1; // -1 means not yet loaded
+
+        async function updateCountdown() {
+            try {
+                const response = await fetch('/api/next_change_time');
+                const data = await response.json();
+                if (data.success) {
+                    countdownSeconds = data.remaining_seconds;
+
+                    // Update plugin names
+                    const currentPluginEl = document.getElementById('currentPlugin');
+                    const nextPluginEl = document.getElementById('nextPlugin');
+                    if (currentPluginEl && data.current_plugin) {
+                        currentPluginEl.textContent = data.current_plugin;
+                    }
+                    if (nextPluginEl && data.next_plugin) {
+                        nextPluginEl.textContent = data.next_plugin;
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching countdown:', error);
+                countdownSeconds = 0; // Show "Changing..." on error
+            }
+        }
+
+        function displayCountdown() {
+            const countdownEl = document.getElementById('countdown');
+            if (!countdownEl) return;
+
+            if (countdownSeconds === -1) {
+                countdownEl.textContent = 'Loading...';
+                return;
+            }
+
+            if (countdownSeconds <= 0) {
+                countdownEl.textContent = 'Changing...';
+                updateCountdown(); // Fetch new time
+                return;
+            }
+
+            const minutes = Math.floor(countdownSeconds / 60);
+            const seconds = countdownSeconds % 60;
+            countdownEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            countdownSeconds = Math.max(0, countdownSeconds - 1);
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             refreshImage();
             setInterval(refreshImage, refreshIntervalMs);
+
+            // Start countdown
+            updateCountdown(); // Initial fetch
+            setInterval(displayCountdown, 1000); // Update display every second
+            setInterval(updateCountdown, 30000); // Refresh from server every 30 seconds
+
+            // Initialize loop toggle button style
+            const loopToggle = document.getElementById('loopToggle');
+            updateLoopToggleStyle();
+
+            function updateLoopToggleStyle() {
+                const enabled = loopToggle.dataset.enabled === 'true';
+                if (enabled) {
+                    loopToggle.style.background = '#28a745';
+                    loopToggle.style.color = 'white';
+                } else {
+                    loopToggle.style.background = '#dc3545';
+                    loopToggle.style.color = 'white';
+                }
+            }
         });
+
+        async function toggleLoop() {
+            const loopToggle = document.getElementById('loopToggle');
+            const loopToggleLabel = document.getElementById('loopToggleLabel');
+            const currentlyEnabled = loopToggle.dataset.enabled === 'true';
+            const newEnabled = !currentlyEnabled;
+
+            try {
+                const response = await fetch('/toggle_loop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: newEnabled })
+                });
+
+                const result = await response.json();
+                if (response.ok) {
+                    loopToggle.dataset.enabled = newEnabled;
+                    loopToggleLabel.textContent = newEnabled ? 'Enabled' : 'Disabled';
+                    updateLoopToggleStyle();
+                    alert(`Loop rotation ${newEnabled ? 'enabled' : 'disabled'}`);
+                } else {
+                    alert('Error: ' + (result.error || 'Failed to toggle loop'));
+                }
+            } catch (error) {
+                alert('Error toggling loop: ' + error.message);
+            }
+        }
     </script>
     <script src="{{ url_for('static', filename='scripts/image_modal.js') }}"></script>
 </head>
 <body>
     <script src="{{ url_for('static', filename='scripts/dark_mode.js') }}"></script>
-    <!-- Subtle frame container -->
+    <!-- Main container -->
     <div class="frame">
-        <!-- Page Title -->
+        <!-- Header -->
         <header class="header">
             <h1>{{ config.name }}</h1>
-            <button class="settings-button dark-mode-toggle" title="Toggle Dark Mode" aria-label="Toggle Dark Mode"></button>
-            <a href="{{ url_for('apikeys.apikeys_page') }}" class="settings-button" title="API Keys">
-                <span style="font-size: 20px;">🔑</span>
-            </a>
-            <a href="{{ url_for('playlist.playlists') }}" class="settings-button">
-                <img src="{{ url_for('static', filename='icons/playlist.png') }}" title="Playlists" alt="playlists icon" class="icon-image">
-            </a>
-            <a href="{{ url_for('settings.settings_page') }}" class="settings-button">
-                <img src="{{ url_for('static', filename='icons/settings.png') }}" title="Settings" alt="settings icon" class="icon-image">
-            </a>
+
+            <div class="header-actions">
+                <button class="settings-button dark-mode-toggle" title="Toggle Dark Mode" aria-label="Toggle Dark Mode"></button>
+                <a href="{{ url_for('apikeys.apikeys_page') }}" class="settings-button" title="API Keys">
+                    <span style="font-size: 20px;">🔑</span>
+                </a>
+                <a href="{{ url_for('loops.loops_page') }}" class="settings-button" title="Loops">
+                    <span style="font-size: 24px;">🔁</span>
+                </a>
+                <a href="{{ url_for('settings.settings_page') }}" class="settings-button">
+                    <img src="{{ url_for('static', filename='icons/settings.png') }}" title="Settings" alt="settings icon" class="icon-image">
+                </a>
+            </div>
         </header>
 
-        <!-- Display the current image -->
-        <div class="image-container">
-            <img src="{{ url_for('static', filename='images/current_image.png') }}" alt="Current Image">
-        </div>
-
-        <!-- Separator -->
-        <div class="separator"></div>
-
-        <div class="plugins-header">
-            <h2 class="plugins-title">Plugins</h2>
-            <div class="plugins-controls">
-                <button class="sort-toggle" id="sortToggle" title="Reorder plugins">Sort</button>
-                <button class="view-toggle" id="viewToggle" title="Switch view">List</button>
+        <!-- Status Dashboard Card -->
+        <div class="status-dashboard-card">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                <span class="countdown-label" style="font-size: 13px; text-transform: none;">Loop Rotation</span>
+                <button id="loopToggle"
+                        class="mode-toggle-btn"
+                        data-enabled="{{ loop_enabled | default(true) | tojson }}"
+                        onclick="toggleLoop()"
+                        title="Click to enable/disable loop rotation"
+                        style="padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold;">
+                    <span id="loopToggleLabel">{{ 'Enabled' if loop_enabled | default(true) else 'Disabled' }}</span>
+                </button>
+            </div>
+            <div class="countdown-section">
+                <div class="plugin-info">
+                    <div class="plugin-info-item current">
+                        <span class="plugin-info-label">Current</span>
+                        <span id="currentPlugin" class="plugin-info-value">...</span>
+                    </div>
+                    <div class="plugin-info-item next">
+                        <span class="plugin-info-label">Next</span>
+                        <span id="nextPlugin" class="plugin-info-value">...</span>
+                    </div>
+                </div>
+                <div class="countdown-display">
+                    <span class="countdown-label">Changes in</span>
+                    <span id="countdown" class="countdown-value">--:--</span>
+                </div>
             </div>
         </div>
 
-        <div class="sort-hint" id="sortHint">Drag plugins to reorder. Click "Save" when done.</div>
+        <!-- Featured Image Card -->
+        <div class="featured-image-card">
+            <div class="image-container">
+                <img src="{{ url_for('static', filename='images/current_image.png') }}" alt="Current Image">
+            </div>
+        </div>
 
-        <div class="plugins-container" id="pluginsContainer">
-            {% for plugin in plugins %}
-            <a href="{{ url_for('plugin.plugin_page', plugin_id=plugin.id) }}"
-               class="plugin-item"
-               data-plugin-id="{{ plugin.id }}"
-               title="{{ plugin.display_name }}"
-               draggable="false">
-                <img src="{{ url_for('plugin.image', plugin_id=plugin.id, filename='icon.png') }}"
-                     alt="{{ plugin.display_name }}"
-                     class="icon-image">
-                <span class="plugin-name">{{ plugin.display_name }}</span>
-            </a>
-            {% endfor %}
+        <!-- Plugins Section -->
+        <div class="plugins-section">
+            <div class="plugins-header">
+                <h2 class="plugins-title">Plugins</h2>
+                <div class="plugins-controls">
+                    <button class="sort-toggle" id="sortToggle" title="Reorder plugins">Sort</button>
+                    <button class="view-toggle" id="viewToggle" title="Switch view">List</button>
+                </div>
+            </div>
+
+            <div class="sort-hint" id="sortHint">Drag plugins to reorder. Click "Save" when done.</div>
+
+            <div class="plugins-container" id="pluginsContainer">
+                {% for plugin in plugins %}
+                <a href="{{ url_for('plugin.plugin_page', plugin_id=plugin.id) }}"
+                   class="plugin-card"
+                   data-plugin-id="{{ plugin.id }}"
+                   title="{{ plugin.display_name }}"
+                   draggable="false">
+                    <div class="plugin-icon">
+                        <img src="{{ url_for('plugin.image', plugin_id=plugin.id, filename='icon.png') }}"
+                             alt="{{ plugin.display_name }}">
+                    </div>
+                    <span class="plugin-name">{{ plugin.display_name }}</span>
+                </a>
+                {% endfor %}
+            </div>
         </div>
 
         <script>
@@ -143,7 +274,7 @@
                 sortHint.classList.add('visible');
                 pluginsContainer.classList.add('sorting');
 
-                document.querySelectorAll('.plugin-item').forEach(item => {
+                document.querySelectorAll('.plugin-card').forEach(item => {
                     item.draggable = true;
                     item.addEventListener('dragstart', handleDragStart);
                     item.addEventListener('dragend', handleDragEnd);
@@ -161,7 +292,7 @@
                 sortHint.classList.remove('visible');
                 pluginsContainer.classList.remove('sorting');
 
-                document.querySelectorAll('.plugin-item').forEach(item => {
+                document.querySelectorAll('.plugin-card').forEach(item => {
                     item.draggable = false;
                     item.removeEventListener('dragstart', handleDragStart);
                     item.removeEventListener('dragend', handleDragEnd);
@@ -189,7 +320,7 @@
 
             function handleDragEnd(e) {
                 this.classList.remove('dragging');
-                document.querySelectorAll('.plugin-item').forEach(item => {
+                document.querySelectorAll('.plugin-card').forEach(item => {
                     item.classList.remove('drag-over');
                 });
             }

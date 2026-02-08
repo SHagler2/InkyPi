@@ -1,6 +1,6 @@
-import requests
 import logging
 from datetime import datetime, date, timedelta
+from utils.http_client import get_http_session
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,8 @@ def fetch_contributions(username, api_key):
     url = "https://api.github.com/graphql"
     headers = {"Authorization": f"Bearer {api_key}"}
     variables = {"username": username}
-    resp = requests.post(url, json={"query": GRAPHQL_QUERY, "variables": variables}, headers=headers, timeout=30)
+    session = get_http_session()
+    resp = session.post(url, json={"query": GRAPHQL_QUERY, "variables": variables}, headers=headers, timeout=30)
     resp.raise_for_status()
     return resp.json()
 

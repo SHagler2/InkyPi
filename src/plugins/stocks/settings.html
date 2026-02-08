@@ -1,0 +1,35 @@
+<div class="form-group">
+    <div class="form-group">
+        <label for="title" class="form-label">Title:</label>
+        <input type="text" id="title" name="title" placeholder="Stock Prices" class="form-input">
+    </div>
+    <div class="form-group">
+        <label for="tickers" class="form-label">Ticker Symbols:</label>
+        <input type="text" id="tickers" name="tickers" placeholder="AAPL, MSFT, GOOGL" required class="form-input">
+        <small style="color: var(--text-secondary);">Enter comma-separated stock symbols, max 6 (e.g., AAPL, MSFT, GOOGL)</small>
+    </div>
+    <div class="form-group nowrap">
+        <label for="fontSize" class="form-label">Font Size:</label>
+        <select id="fontSize" name="fontSize" class="form-input">
+            <option value="x-small">Extra Small</option>
+            <option value="small">Small</option>
+            <option value="normal">Normal</option>
+            <option value="large">Large</option>
+            <option value="x-large">Extra Large</option>
+        </select>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        let fontSize = "normal";
+        if (loadPluginSettings) {
+            document.getElementById('title').value = pluginSettings.title || '';
+            document.getElementById('tickers').value = pluginSettings.tickers || '';
+
+            fontSize = pluginSettings.fontSize || 'normal';
+        }
+
+        document.getElementById('fontSize').value = fontSize;
+    });
+</script>

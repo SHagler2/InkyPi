@@ -1,6 +1,6 @@
 from plugins.base_plugin.base_plugin import BasePlugin
 from datetime import datetime, timedelta
-from utils.image_utils import get_image
+from utils.image_loader import AdaptiveImageLoader
 from PIL import Image
 import logging
 from plugins.newspaper.constants import NEWSPAPERS
@@ -22,29 +22,36 @@ class Newspaper(BasePlugin):
         # check the next day, then today, then prior day
         days = [today + timedelta(days=diff) for diff in [1,0,-1,-2]]
 
+        # Get target dimensions for image loading
+        dimensions = device_config.get_resolution()
+        if device_config.get_config("orientation") == "horizontal":
+            dimensions = dimensions[::-1]
+
         image = None
+        loader = AdaptiveImageLoader(device_config)
         for date in days:
             image_url = FREEDOM_FORUM_URL.format(date.day, newspaper_slug)
-            image = get_image(image_url)
-            if image:
-                logger.info(f"Found {newspaper_slug} front cover for {date.strftime('%Y-%m-%d')}")
-                break
+            try:
+                # Use AdaptiveImageLoader for memory-efficient loading
+                image = loader.from_url(image_url, dimensions, mode='fit')
+                if image:
+                    logger.info(f"Found {newspaper_slug} front cover for {date.strftime('%Y-%m-%d')}")
+                    break
+            except Exception as e:
+                logger.debug(f"Failed to load newspaper for {date.strftime('%Y-%m-%d')}: {e}")
+                continue
 
         if image:
-            # expand height if newspaper is wider than resolution
+            # Expand height if newspaper is narrower than resolution
+            # (some newspapers are in portrait format and need vertical padding)
             img_width, img_height = image.size
-
-            dimensions = device_config.get_resolution()
-            if device_config.get_config("orientation") == "horizontal":
-                dimensions = dimensions[::-1]
-
             desired_width, desired_height = dimensions
 
             img_ratio = img_width / img_height
             desired_ratio = desired_width / desired_height
 
             if img_ratio < desired_ratio:
-                new_height =  int((img_width*desired_width) / desired_height)
+                new_height = int((img_width * desired_width) / desired_height)
                 new_image = Image.new("RGB", (img_width, new_height), (255, 255, 255))
                 new_image.paste(image, (0, 0))
                 image = new_image

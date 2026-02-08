@@ -1,8 +1,9 @@
 import os
 import json
 import logging
+import tempfile
 from dotenv import load_dotenv
-from model import PlaylistManager, RefreshInfo
+from model import RefreshInfo, LoopManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class Config:
     def __init__(self):
         self.config = self.read_config()
         self.plugins_list = self.read_plugins_list()
-        self.playlist_manager = self.load_playlist_manager()
+        self.loop_manager = self.load_loop_manager()
         self.refresh_info = self.load_refresh_info()
 
     def read_config(self):
@@ -53,12 +54,29 @@ class Config:
         return plugins_list
 
     def write_config(self):
-        """Updates the cached config from the model objects and writes to the config file."""
+        """Updates the cached config from the model objects and writes to the config file atomically.
+
+        Uses atomic write pattern (write to temp file, then rename) to prevent
+        config corruption if power is lost during write.
+        """
         logger.debug(f"Writing device config to {self.config_file}")
-        self.update_value("playlist_config", self.playlist_manager.to_dict())
+        self.update_value("loop_config", self.loop_manager.to_dict())
         self.update_value("refresh_info", self.refresh_info.to_dict())
-        with open(self.config_file, 'w') as outfile:
-            json.dump(self.config, outfile, indent=4)
+
+        # Atomic write: write to temp file first, then rename
+        config_dir = os.path.dirname(self.config_file)
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', dir=config_dir,
+                                              suffix='.tmp', delete=False) as tmp_file:
+                json.dump(self.config, tmp_file, indent=4)
+                tmp_path = tmp_file.name
+            # Atomic rename (on POSIX systems)
+            os.replace(tmp_path, self.config_file)
+        except Exception as e:
+            logger.error(f"Failed to write config atomically: {e}")
+            # Fallback to direct write if atomic fails
+            with open(self.config_file, 'w') as outfile:
+                json.dump(self.config, outfile, indent=4)
 
     def get_config(self, key=None, default={}):
         """Gets the value of a specific configuration key or returns the entire config if none provided."""
@@ -117,21 +135,19 @@ class Config:
         load_dotenv(override=True)
         return os.getenv(key)
 
-    def load_playlist_manager(self):
-        """Loads the playlist manager object from the config."""
-        playlist_manager = PlaylistManager.from_dict(self.get_config("playlist_config"))
-        if not playlist_manager.playlists:
-            playlist_manager.add_default_playlist()
-        return playlist_manager
-
     def load_refresh_info(self):
         """Loads the refresh information from the config."""
         return RefreshInfo.from_dict(self.get_config("refresh_info"))
 
-    def get_playlist_manager(self):
-        """Returns the playlist manager."""
-        return self.playlist_manager
-
     def get_refresh_info(self):
         """Returns the refresh information."""
         return self.refresh_info
+
+    def load_loop_manager(self):
+        """Loads the loop manager object from the config."""
+        loop_config = self.get_config("loop_config", default={})
+        return LoopManager.from_dict(loop_config)
+
+    def get_loop_manager(self):
+        """Returns the loop manager."""
+        return self.loop_manager

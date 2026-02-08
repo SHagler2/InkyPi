@@ -9,15 +9,15 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 1dvh;
+  justify-content: space-between;
+  gap: 0dvh;
   width: 100%;
   height: 100%;
   font-family: "Jost"
 }
 
 .header {
-  height: 15dvh;
+  height: 8dvh;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -44,9 +44,10 @@
   text-align: center;
   align-content: end;
   width: 100%;
-  font-weight: bold;
+  font-weight: 700;
   line-height: 102%;
   height: 100%;
+  color: #000;
 }
 
 .current-date {
@@ -55,14 +56,19 @@
   align-content: end;
   width: 100%;
   line-height: 105%;
+  font-weight: 500;
+  color: #000;
 }
 
 .today-container {
   display: flex;
   flex-direction: row;
   justify-content: center;
+  align-items: center;
   width: 100%;
   overflow: hidden;
+  height: 37dvh;
+  min-height: 0;
 }
 
 /* Current Weather Row */
@@ -95,33 +101,43 @@
   align-content: end;
   position: relative;
   height: 50%;
+  font-weight: 700;
+  color: #000;
 }
 
 .temperature-unit {
   font-size: 0.4em;
   position: absolute;
   top: 0.6em;
+  font-weight: 600;
+  color: #000;
 }
 
 
 /* Data Points Grid */
 .data-points {
   display: grid;
-  justify-content: space-evenly;
+  justify-content: center;
   grid-template-columns: repeat(2, 1fr);
-  gap: 0.5vh 1vw;
+  grid-template-rows: repeat(2, 1fr);
+  gap: 1.5vh 2vw;
   width: 50%;
+  align-content: center;
+  height: 100%;
+  max-height: 100%;
+  padding: 1vh 1vw;
 }
 
 .data-point {
   width: 100%;
   justify-content: left;
   overflow: hidden;
+  height: 100%;
 }
 
 .data-point-img-container {
-  width: 25%;
-  height: 80%;
+  width: 30%;
+  height: 90%;
   align-content: center;
 }
 
@@ -132,7 +148,7 @@
 }
 
 .data-point-data {
-  width: 75%;
+  width: 72%;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -142,28 +158,32 @@
 }
 
 .data-point-label {
-  font-size: min(32cqh, 15cqi);
+  font-size: min(35cqh, 16cqi);
   text-align: center;
-  font-weight: lighter;
-  height: 30%
+  font-weight: 500;
+  height: 32%;
+  line-height: 100%;
+  color: #000;
 }
 
 .data-point-measurement,
 .wind-arrow-symbol {
-  font-size: min(46cqh, 26cqi);
+  font-size: min(50cqh, 28cqi);
   text-align: center;
   white-space: nowrap;
   align-content: center;
-  height: 70%;
-  font-weight: bold;
-  line-height: 105%;
+  height: 68%;
+  font-weight: 700;
+  line-height: 100%;
   display: inline-block;
+  color: #000;
 }
 
 .data-point-unit {
   font-size: 0.6em;
-  font-weight: lighter;
+  font-weight: 500;
   margin-left: 0.2vw;
+  color: #000;
 }
 
 /* Forecast Row */
@@ -174,7 +194,8 @@
   justify-content: space-evenly;
   align-items: center;
   width: 100%;
-  gap: 1.5dvw;
+  height: 30dvh;
+  gap: 1.2dvw;
   overflow: hidden;
 }
 
@@ -182,16 +203,16 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 1dvh 1vw;
+  padding: 0.8dvh 0.8vw;
   border: 1px solid;
   border-radius: 1.2vw;
   min-width: 0;
   max-height: 100%;
-  gap: 0.5dvh
+  gap: 0.4dvh
 }
 
 .forecast-day-name {
-  font-size: min(3.5dvh, 3.5vw);
+  font-size: min(2.8dvh, 2.8vw);
   flex: 1;
   height: 100%;
   min-height: 0;
@@ -199,8 +220,9 @@
   width: 100%;
   text-align: center;
   align-content: center;
-  font-weight: bold;
+  font-weight: 700;
   line-height: 100%;
+  color: #000;
 }
 
 .forecast-icon {
@@ -211,8 +233,8 @@
   min-width: 0;
   min-height: 0;
   object-fit: contain;
-  padding: 0 1vw;
-  max-width: 15dvw;
+  padding: 0 0.8vw;
+  max-width: 12dvw;
 }
 
 .forecast-temps {
@@ -222,11 +244,17 @@
   min-height: 0;
   min-width: 0;
   height: 100%;
-  font-size: min(3dvh, 2.5vw);
+  font-size: min(2.4dvh, 2vw);
+  font-weight: 600;
+  color: #000;
 }
 
-.low .high {
-  font-weight: normal;
+.forecast-temps .high {
+  font-weight: 700;
+}
+
+.forecast-temps .low {
+  font-weight: 500;
 }
 
 .current-weather {
@@ -242,14 +270,14 @@
 
 .chart-container {
   width: 100%;
-  height: 24dvh;
+  height: 25dvh;
 }
 
 .separator {
   border-top: 1px #AAA solid;
   height: 1px;
   width: 90%;
-  margin: 3px auto 0 auto;
+  margin: 2px auto 0 auto;
 }
 
 .moon-phase-icon {
@@ -260,15 +288,18 @@
   min-width: 0;
   min-height: 0;
   object-fit: contain;
-  padding: 0 1vw;
-  max-width: 4dvw;
+  padding: 0 0.8vw;
+  max-width: 3.2dvw;
 }
 
 .moon-phase-container {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   justify-content: center;
   align-items: center;
+  font-size: min(2dvh, 1.6vw);
+  font-weight: 600;
+  color: #000;
 }
 
 .min-max {
@@ -276,6 +307,8 @@
   text-align: center;
   position: relative;
   line-height: 140%;
+  font-weight: 600;
+  color: #000;
 }
 
 .feels-like {
@@ -283,6 +316,18 @@
   text-align: center;
   position: relative;
   line-height: 140%;
+  font-weight: 500;
+  color: #000;
+}
+
+.weather-description-inline {
+  font-size: 11cqmin;
+  text-align: center;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 130%;
+  margin-top: 2cqmin;
+  color: #000;
 }
 
 @media (max-aspect-ratio: 1) {

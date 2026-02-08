@@ -3,6 +3,7 @@ from dotenv import dotenv_values
 import os
 import re
 import logging
+import tempfile
 
 logger = logging.getLogger(__name__)
 apikeys_bp = Blueprint("apikeys", __name__)
@@ -28,20 +29,42 @@ def parse_env_file(filepath):
 
 
 def write_env_file(filepath, entries):
-    """Write entries to .env file."""
+    """Write entries to .env file atomically.
+
+    Uses atomic write pattern (write to temp file, then rename) to prevent
+    API key corruption if power is lost during write.
+    """
     try:
-        with open(filepath, 'w') as f:
-            f.write("# InkyPi API Keys and Secrets\n")
-            f.write("# Managed via web interface\n\n")
+        env_dir = os.path.dirname(filepath)
+        # Atomic write: write to temp file first, then rename
+        with tempfile.NamedTemporaryFile(mode='w', dir=env_dir,
+                                          suffix='.tmp', delete=False) as tmp_file:
+            tmp_file.write("# InkyPi API Keys and Secrets\n")
+            tmp_file.write("# Managed via web interface\n\n")
             for key, value in entries:
                 # Quote values with spaces or special characters
                 if ' ' in value or '"' in value or "'" in value:
                     value = f'"{value}"'
-                f.write(f"{key}={value}\n")
+                tmp_file.write(f"{key}={value}\n")
+            tmp_path = tmp_file.name
+        # Atomic rename (on POSIX systems)
+        os.replace(tmp_path, filepath)
         return True
     except Exception as e:
-        logger.error(f"Error writing .env file: {e}")
-        return False
+        logger.error(f"Error writing .env file atomically: {e}")
+        # Fallback to direct write if atomic fails
+        try:
+            with open(filepath, 'w') as f:
+                f.write("# InkyPi API Keys and Secrets\n")
+                f.write("# Managed via web interface\n\n")
+                for key, value in entries:
+                    if ' ' in value or '"' in value or "'" in value:
+                        value = f'"{value}"'
+                    f.write(f"{key}={value}\n")
+            return True
+        except Exception as e2:
+            logger.error(f"Fallback write also failed: {e2}")
+            return False
 
 
 def mask_value(value):
@@ -90,9 +113,11 @@ def save_apikeys():
             if not key:
                 continue
             
-            # Validate key format
+            # Validate key format and length
             if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', key):
                 return jsonify({"error": f"Invalid key format: {key}"}), 400
+            if len(key) > 100:
+                return jsonify({"error": f"Key name too long: {key[:20]}..."}), 400
             
             if keep_existing:
                 # Use existing value from .env file
@@ -100,7 +125,10 @@ def save_apikeys():
             else:
                 # Use provided value
                 value = entry.get('value', '').strip()
-            
+
+            # Sanitize value to ASCII (fixes copy/paste issues with special characters like em-dashes)
+            value = value.encode('ascii', errors='ignore').decode('ascii').strip()
+
             valid_entries.append((key, value))
         
         if write_env_file(env_path, valid_entries):

@@ -1,17 +1,20 @@
-import requests
 from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 from io import BytesIO
 import os
 import logging
 import hashlib
+import zlib
 import tempfile
 import subprocess
 import shutil
+from utils.http_client import get_http_session
 
 logger = logging.getLogger(__name__)
 
 def get_image(image_url):
-    response = requests.get(image_url, timeout=30)
+    """Download image from URL using shared HTTP session with connection pooling."""
+    session = get_http_session()
+    response = session.get(image_url, timeout=30)
     img = None
     if 200 <= response.status_code < 300 or response.status_code == 304:
         img = Image.open(BytesIO(response.content))
@@ -83,10 +86,15 @@ def apply_image_enhancement(img, image_settings={}):
     return img
 
 def compute_image_hash(image):
-    """Compute SHA-256 hash of an image."""
+    """Compute fast non-cryptographic hash of an image for change detection.
+
+    Uses Adler-32 which is significantly faster than SHA-256 and sufficient
+    for detecting image changes (not for security purposes).
+    """
     image = image.convert("RGB")
     img_bytes = image.tobytes()
-    return hashlib.sha256(img_bytes).hexdigest()
+    # Adler-32 is ~10-20x faster than SHA-256 for this use case
+    return format(zlib.adler32(img_bytes) & 0xffffffff, '08x')
 
 def take_screenshot_html(html_str, dimensions, timeout_ms=None):
     image = None
@@ -153,7 +161,9 @@ def take_screenshot(target, dimensions, timeout_ms=None):
         ]
         if timeout_ms:
             command.append(f"--timeout={timeout_ms}")
-        result = subprocess.run(command, capture_output=True, check=False)
+        # Add process-level timeout (default 60s) to prevent hanging
+        process_timeout = (timeout_ms / 1000 + 10) if timeout_ms else 60
+        result = subprocess.run(command, capture_output=True, check=False, timeout=process_timeout)
 
         # Check if the process failed or the output file is missing
         if result.returncode != 0 or not os.path.exists(img_file_path):

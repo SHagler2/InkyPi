@@ -1,0 +1,34 @@
+{% extends "plugin.html" %}
+
+{% block content %}
+
+<div class="stocks-container" style="--font-scale: {{ font_scale }}; --count-scale: {{ count_scale }}; --columns: {{ columns }}; --rows: {{ rows }};">
+    <div class="header">
+        {% if title %}<div class="title">{{ title }}</div>{% endif %}
+        <div class="last-updated">{{ last_updated }}</div>
+    </div>
+
+    <div class="stocks-grid">
+        {% for stock in stocks %}
+        <div class="stock-card">
+            <div class="stock-main">
+                <div class="stock-info">
+                    <div class="stock-symbol">{{ stock.symbol }}</div>
+                    <div class="stock-name">{{ stock.name }}</div>
+                </div>
+                <div class="stock-price">{{ stock.price_formatted }}</div>
+            </div>
+            <div class="stock-change {% if stock.is_positive %}positive{% else %}negative{% endif %}">
+                {{ stock.change_formatted }} ({{ stock.change_percent_formatted }})
+            </div>
+            <div class="stock-details">
+                <span>Vol: {{ stock.volume }}</span>
+                <span>H: {{ stock.high_formatted }}</span>
+                <span>L: {{ stock.low_formatted }}</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% endblock %}

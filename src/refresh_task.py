@@ -1,13 +1,14 @@
 import threading
 import time
 import os
+import gc
 import logging
 import psutil
 import pytz
 from datetime import datetime, timezone
 from plugins.plugin_registry import get_plugin_instance
 from utils.image_utils import compute_image_hash
-from model import RefreshInfo, PlaylistManager
+from model import RefreshInfo, LoopManager
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,10 @@ class RefreshTask:
         self.refresh_event.set()
         self.refresh_result = {}
 
+        # Config write batching - only write periodically to reduce SD card wear
+        self.refresh_counter = 0
+        self.config_write_interval = 12  # Write every 12 refreshes (~1 hour at 5-min intervals)
+
     def start(self):
         """Starts the background thread for refreshing the display."""
         if not self.thread or not self.thread.is_alive():
@@ -45,6 +50,9 @@ class RefreshTask:
         if self.thread:
             logger.info("Stopping refresh task")
             self.thread.join()
+        # Write config on shutdown to persist final state
+        logger.info("Writing final config on shutdown")
+        self.device_config.write_config()
 
     def _run(self):
         """Background task that manages the periodic refresh of the display.
@@ -73,7 +81,9 @@ class RefreshTask:
         while True:
             try:
                 with self.condition:
-                    sleep_time = self.device_config.get_config("plugin_cycle_interval_seconds", default=60*60)
+                    # Get sleep time from loop manager
+                    loop_manager = self.device_config.get_loop_manager()
+                    sleep_time = loop_manager.rotation_interval_seconds
 
                     # Wait for sleep_time or until notified
                     self.condition.wait(timeout=sleep_time)
@@ -84,7 +94,6 @@ class RefreshTask:
                     if not self.running:
                         break
 
-                    playlist_manager = self.device_config.get_playlist_manager()
                     latest_refresh = self.device_config.get_refresh_info()
                     current_dt = self._get_current_datetime()
 
@@ -99,11 +108,19 @@ class RefreshTask:
                         if self.device_config.get_config("log_system_stats"):
                             self.log_system_stats()
 
-                        # handle refresh based on playlists
+                        # Check if loop rotation is enabled
+                        loop_enabled = self.device_config.get_config("loop_enabled", default=True)
+                        if not loop_enabled:
+                            logger.info("Loop rotation is disabled, skipping automatic refresh")
+                            continue
+
+                        # handle refresh using loop mode
                         logger.info(f"Running interval refresh check. | current_time: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}")
-                        playlist, plugin_instance = self._determine_next_plugin(playlist_manager, latest_refresh, current_dt)
-                        if plugin_instance:
-                            refresh_action = PlaylistRefresh(playlist, plugin_instance)
+
+                        loop_manager = self.device_config.get_loop_manager()
+                        loop, plugin_ref = self._determine_next_plugin_loop_mode(loop_manager, current_dt)
+                        if plugin_ref:
+                            refresh_action = LoopRefresh(loop, plugin_ref)
 
                     if refresh_action:
                         plugin_config = self.device_config.get_plugin(refresh_action.get_plugin_id())
@@ -123,18 +140,34 @@ class RefreshTask:
                         else:
                             logger.info(f"Image already displayed, skipping refresh. | refresh_info: {refresh_info}")
 
-                        # update latest refresh data in the device config
+                        # update latest refresh data in the device config (in-memory only)
                         self.device_config.refresh_info = RefreshInfo(**refresh_info)
-                        self.device_config.write_config()
+
+                        # Batch config writes to reduce SD card wear
+                        # Only write periodically, not on every refresh
+                        self.refresh_counter += 1
+                        if self.refresh_counter >= self.config_write_interval:
+                            logger.debug(f"Writing config to disk (batched after {self.refresh_counter} refreshes)")
+                            self.device_config.write_config()
+                            self.refresh_counter = 0
+
+                        # Clean up memory after successful refresh to prevent accumulation
+                        gc.collect()
 
             except Exception as e:
                 logger.exception('Exception during refresh')
                 self.refresh_result["exception"] = e  # Capture exception
+                # Trigger garbage collection to clean up any partially-loaded resources
+                # from failed image generation (PIL Images, HTTP connections, etc.)
+                gc.collect()
             finally:
                 self.refresh_event.set()
 
     def manual_update(self, refresh_action):
-        """Manually triggers an update for the specified plugin id and plugin settings by notifying the background process."""
+        """Manually triggers an update for the specified plugin id and plugin settings by notifying the background process.
+
+        This method BLOCKS until the refresh completes. For non-blocking behavior, use queue_manual_update().
+        """
         if self.running:
             with self.condition:
                 self.manual_update_request = refresh_action
@@ -149,8 +182,36 @@ class RefreshTask:
         else:
             logger.warning("Background refresh task is not running, unable to do a manual update")
 
-    def signal_config_change(self):
-        """Notify the background thread that config has changed (e.g., interval updated)."""
+    def queue_manual_update(self, refresh_action):
+        """Queues a manual update without blocking. Returns immediately.
+
+        Use this for async operations where you don't need to wait for the refresh to complete.
+        The refresh will happen in the background thread.
+
+        Returns:
+            bool: True if the update was queued successfully, False if the task is not running.
+        """
+        if self.running:
+            with self.condition:
+                self.manual_update_request = refresh_action
+                self.refresh_result = {}
+                self.refresh_event.clear()
+                self.condition.notify_all()  # Wake the thread to process manual update
+            return True
+        else:
+            logger.warning("Background refresh task is not running, unable to queue manual update")
+            return False
+
+    def signal_config_change(self, write_immediately=False):
+        """Notify the background thread that config has changed (e.g., interval updated).
+
+        Args:
+            write_immediately: If True, force an immediate config write (for user-initiated changes)
+        """
+        if write_immediately:
+            logger.debug("Config change detected, writing immediately")
+            self.device_config.write_config()
+            self.refresh_counter = 0  # Reset counter after immediate write
         if self.running:
             with self.condition:
                 self.condition.notify_all()
@@ -160,36 +221,31 @@ class RefreshTask:
         tz_str = self.device_config.get_config("timezone", default="UTC")
         return datetime.now(pytz.timezone(tz_str))
 
-    def _determine_next_plugin(self, playlist_manager, latest_refresh_info, current_dt):
-        """Determines the next plugin to refresh based on the active playlist, plugin cycle interval, and current time."""
-        playlist = playlist_manager.determine_active_playlist(current_dt)
-        if not playlist:
-            playlist_manager.active_playlist = None
-            logger.info(f"No active playlist determined.")
+    def _determine_next_plugin_loop_mode(self, loop_manager, current_dt):
+        """Determines the next plugin to refresh in loop mode based on the active loop and rotation."""
+        loop = loop_manager.determine_active_loop(current_dt)
+        if not loop:
+            loop_manager.active_loop = None
+            logger.info("No active loop determined.")
             return None, None
 
-        playlist_manager.active_playlist = playlist.name
-        if not playlist.plugins:
-            logger.info(f"Active playlist '{playlist.name}' has no plugins.")
+        loop_manager.active_loop = loop.name
+        if not loop.plugin_order:
+            logger.info(f"Active loop '{loop.name}' has no plugins.")
             return None, None
 
-        latest_refresh_dt = latest_refresh_info.get_refresh_datetime()
-        plugin_cycle_interval = self.device_config.get_config("plugin_cycle_interval_seconds", default=3600)
-        should_refresh = PlaylistManager.should_refresh(latest_refresh_dt, plugin_cycle_interval, current_dt)
+        # In loop mode, rotation happens automatically after sleep interval
+        # Just get the next plugin in sequence
+        plugin_ref = loop.get_next_plugin()
+        logger.info(f"Determined next plugin. | active_loop: {loop.name} | plugin_id: {plugin_ref.plugin_id}")
 
-        if not should_refresh:
-            latest_refresh_str = latest_refresh_dt.strftime('%Y-%m-%d %H:%M:%S') if latest_refresh_dt else "None"
-            logger.info(f"Not time to update display. | latest_update: {latest_refresh_str} | plugin_cycle_interval: {plugin_cycle_interval}")
-            return None, None
+        return loop, plugin_ref
 
-        plugin = playlist.get_next_plugin()
-        logger.info(f"Determined next plugin. | active_playlist: {playlist.name} | plugin_instance: {plugin.name}")
-
-        return playlist, plugin
-    
     def log_system_stats(self):
+        # Use non-blocking CPU sampling (returns estimate since last call)
+        # This avoids 1+ second blocking delay on every refresh
         metrics = {
-            'cpu_percent': psutil.cpu_percent(interval=1),
+            'cpu_percent': psutil.cpu_percent(interval=None),
             'memory_percent': psutil.virtual_memory().percent,
             'disk_percent': psutil.disk_usage('/').percent,
             'load_avg_1_5_15': os.getloadavg(),
@@ -241,48 +297,73 @@ class ManualRefresh(RefreshAction):
         """Return the plugin ID associated with this refresh."""
         return self.plugin_id
 
-class PlaylistRefresh(RefreshAction):
-    """Performs a refresh using a plugin instance within a playlist context.
+class LoopRefresh(RefreshAction):
+    """Performs refresh using a plugin reference within a loop context.
+
+    Unlike PlaylistRefresh, this doesn't use custom settings - plugins use their default configuration.
+    Data refresh is controlled by the plugin_reference's refresh_interval_seconds.
 
     Attributes:
-        playlist: The playlist object associated with the refresh.
-        plugin_instance: The plugin instance to refresh.
+        loop: The Loop object
+        plugin_reference: PluginReference to display
+        force: If True, bypass cache and always regenerate image
     """
 
-    def __init__(self, playlist, plugin_instance, force=False):
-        self.playlist = playlist
-        self.plugin_instance = plugin_instance
+    def __init__(self, loop, plugin_reference, force=False):
+        self.loop = loop
+        self.plugin_reference = plugin_reference
         self.force = force
 
     def get_refresh_info(self):
         """Return refresh metadata as a dictionary."""
         return {
-            "refresh_type": "Playlist",
-            "playlist": self.playlist.name,
-            "plugin_id": self.plugin_instance.plugin_id,
-            "plugin_instance": self.plugin_instance.name
+            "refresh_type": "Loop",
+            "loop": self.loop.name,
+            "plugin_id": self.plugin_reference.plugin_id
         }
 
     def get_plugin_id(self):
         """Return the plugin ID associated with this refresh."""
-        return self.plugin_instance.plugin_id
+        return self.plugin_reference.plugin_id
 
     def execute(self, plugin, device_config, current_dt: datetime):
-        """Performs a refresh for the specified plugin instance within its playlist context."""
-        # Determine the file path for the plugin's image
-        plugin_image_path = os.path.join(device_config.plugin_image_dir, self.plugin_instance.get_image_path())
+        """Performs a refresh for the plugin reference in loop mode.
 
-        # Check if a refresh is needed based on the plugin instance's criteria
-        if self.plugin_instance.should_refresh(current_dt) or self.force:
-            logger.info(f"Refreshing plugin instance. | plugin_instance: '{self.plugin_instance.name}'") 
-            # Generate a new image
-            image = plugin.generate_image(self.plugin_instance.settings, device_config)
+        Checks if the plugin's data needs refreshing based on its refresh interval.
+        If data refresh is needed, generates a new image. Otherwise, uses cached image.
+
+        Special handling: If randomization is enabled (randomizeWpotd, randomizeApod),
+        always generate a new image to get a different random selection.
+        """
+        # Determine the file path for the plugin's image
+        plugin_image_path = os.path.join(device_config.plugin_image_dir, f"loop_{self.plugin_reference.plugin_id}.png")
+
+        # Check if this plugin has randomization enabled
+        settings = self.plugin_reference.plugin_settings or {}
+        is_randomized = (
+            settings.get("randomizeWpotd") == "true" or
+            settings.get("randomizeApod") == "true"
+        )
+
+        # Check if data refresh is needed (or forced, or randomized)
+        if self.force or is_randomized or self.plugin_reference.should_refresh(current_dt):
+            reason = "forced" if self.force else ("randomized" if is_randomized else "interval elapsed")
+            logger.info(f"Refreshing plugin data ({reason}). | plugin_id: '{self.plugin_reference.plugin_id}'")
+            # Generate a new image with plugin's settings (or empty dict if none)
+            image = plugin.generate_image(self.plugin_reference.plugin_settings, device_config)
             image.save(plugin_image_path)
-            self.plugin_instance.latest_refresh_time = current_dt.isoformat()
+            self.plugin_reference.latest_refresh_time = current_dt.isoformat()
         else:
-            logger.info(f"Not time to refresh plugin instance, using latest image. | plugin_instance: {self.plugin_instance.name}.")
-            # Load the existing image from disk
-            with Image.open(plugin_image_path) as img:
-                image = img.copy()
+            logger.info(f"Plugin data still fresh, using cached image. | plugin_id: {self.plugin_reference.plugin_id}")
+            # Load the existing image from disk if it exists
+            if os.path.exists(plugin_image_path):
+                with Image.open(plugin_image_path) as img:
+                    image = img.copy()
+            else:
+                # First time displaying this plugin, generate new image
+                logger.info(f"No cached image found, generating new image. | plugin_id: {self.plugin_reference.plugin_id}")
+                image = plugin.generate_image(self.plugin_reference.plugin_settings, device_config)
+                image.save(plugin_image_path)
+                self.plugin_reference.latest_refresh_time = current_dt.isoformat()
 
         return image

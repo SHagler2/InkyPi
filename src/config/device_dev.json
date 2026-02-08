@@ -28,17 +28,18 @@
         "wpotd",
         "year_progress"
     ],
-    "playlist_config": {
-        "playlists": [
+    "loop_config": {
+        "loops": [
             {
                 "name": "Default",
                 "start_time": "00:00",
                 "end_time": "24:00",
-                "plugins": [],
+                "plugin_order": [],
                 "current_plugin_index": null
             }
         ],
-        "active_playlist": null
+        "rotation_interval_seconds": 300,
+        "active_loop": null
     },
     "refresh_info": {
         "refresh_time": null,
