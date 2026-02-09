@@ -174,13 +174,14 @@ class Loop:
         randomize (bool): If True, randomly select next plugin instead of sequential order.
     """
 
-    def __init__(self, name, start_time, end_time, plugin_order=None, current_plugin_index=None, randomize=False):
+    def __init__(self, name, start_time, end_time, plugin_order=None, current_plugin_index=None, randomize=False, next_plugin_index=None):
         self.name = name
         self.start_time = start_time
         self.end_time = end_time
         self.plugin_order = [PluginReference.from_dict(p) for p in (plugin_order or [])]
         self.current_plugin_index = current_plugin_index
         self.randomize = randomize
+        self.next_plugin_index = next_plugin_index  # Pre-computed next plugin
 
         # Cache time range calculation to avoid repeated string parsing
         self._cached_time_range_minutes = None
@@ -231,28 +232,55 @@ class Loop:
 
         If randomize is enabled, selects a random plugin (avoiding the current one if possible).
         Otherwise, cycles through plugins sequentially.
+
+        Also pre-computes the following plugin so it can be displayed in the UI.
         """
         if not self.plugin_order:
             return None
 
-        if self.randomize:
-            # Random selection - try to avoid repeating the same plugin
-            if len(self.plugin_order) == 1:
-                self.current_plugin_index = 0
-            elif self.current_plugin_index is not None:
-                # Pick a random index different from current
-                available_indices = [i for i in range(len(self.plugin_order)) if i != self.current_plugin_index]
-                self.current_plugin_index = random.choice(available_indices)
-            else:
-                self.current_plugin_index = random.randint(0, len(self.plugin_order) - 1)
+        # Use pre-computed next if available, otherwise compute it
+        if self.next_plugin_index is not None:
+            self.current_plugin_index = self.next_plugin_index
+        elif self.randomize:
+            # First time in random mode
+            self.current_plugin_index = random.randint(0, len(self.plugin_order) - 1)
         else:
-            # Sequential rotation
-            if self.current_plugin_index is None:
-                self.current_plugin_index = 0
-            else:
-                self.current_plugin_index = (self.current_plugin_index + 1) % len(self.plugin_order)
+            # First time in sequential mode
+            self.current_plugin_index = 0 if self.current_plugin_index is None else (self.current_plugin_index + 1) % len(self.plugin_order)
+
+        # Pre-compute the NEXT plugin for UI display
+        self._compute_next_plugin_index()
 
         return self.plugin_order[self.current_plugin_index]
+
+    def _compute_next_plugin_index(self):
+        """Pre-compute the next plugin index for UI display."""
+        if not self.plugin_order:
+            self.next_plugin_index = None
+            return
+
+        if self.randomize:
+            # Random selection - avoid current plugin if possible
+            if len(self.plugin_order) == 1:
+                self.next_plugin_index = 0
+            else:
+                available_indices = [i for i in range(len(self.plugin_order)) if i != self.current_plugin_index]
+                self.next_plugin_index = random.choice(available_indices)
+        else:
+            # Sequential - next in order
+            if self.current_plugin_index is None:
+                self.next_plugin_index = 0
+            else:
+                self.next_plugin_index = (self.current_plugin_index + 1) % len(self.plugin_order)
+
+    def peek_next_plugin(self):
+        """Return the pre-computed next plugin without advancing. For UI display."""
+        if not self.plugin_order:
+            return None
+        if self.next_plugin_index is not None:
+            return self.plugin_order[self.next_plugin_index]
+        # Fallback if not yet computed
+        return self.plugin_order[0] if self.plugin_order else None
 
     def get_priority(self):
         """Determine priority of a loop based on the time range."""
@@ -289,7 +317,8 @@ class Loop:
             "end_time": self.end_time,
             "plugin_order": [ref.to_dict() for ref in self.plugin_order],
             "current_plugin_index": self.current_plugin_index,
-            "randomize": self.randomize
+            "randomize": self.randomize,
+            "next_plugin_index": self.next_plugin_index
         }
 
     @classmethod
@@ -300,7 +329,8 @@ class Loop:
             end_time=data["end_time"],
             plugin_order=data.get("plugin_order", []),
             current_plugin_index=data.get("current_plugin_index"),
-            randomize=data.get("randomize", False)
+            randomize=data.get("randomize", False),
+            next_plugin_index=data.get("next_plugin_index")
         )
 
 

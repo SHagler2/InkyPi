@@ -88,6 +88,47 @@ def toggle_loop():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@main_bp.route('/api/skip_to_next', methods=['POST'])
+def skip_to_next():
+    """Skip to the next plugin in the loop immediately."""
+    from refresh_task import LoopRefresh
+
+    device_config = current_app.config['DEVICE_CONFIG']
+    refresh_task = current_app.config.get('REFRESH_TASK')
+
+    if not refresh_task or not refresh_task.running:
+        return jsonify({"error": "Refresh task not running"}), 503
+
+    try:
+        loop_manager = device_config.get_loop_manager()
+        current_dt = datetime.now()
+
+        # Determine active loop and get next plugin
+        loop = loop_manager.determine_active_loop(current_dt)
+        if not loop or not loop.plugin_order:
+            return jsonify({"error": "No active loop or no plugins in loop"}), 400
+
+        # Get the next plugin (loop.get_next_plugin() advances the index)
+        plugin_ref = loop.get_next_plugin()
+
+        # Queue the refresh (non-blocking)
+        refresh_action = LoopRefresh(loop, plugin_ref, force=True)
+        refresh_task.queue_manual_update(refresh_action)
+
+        # Get display name for response
+        plugin_config = device_config.get_plugin(plugin_ref.plugin_id)
+        plugin_name = plugin_config.get("display_name", plugin_ref.plugin_id) if plugin_config else plugin_ref.plugin_id
+
+        return jsonify({
+            "success": True,
+            "message": f"Skipping to {plugin_name}",
+            "plugin_id": plugin_ref.plugin_id,
+            "plugin_name": plugin_name
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @main_bp.route('/api/next_change_time')
 def get_next_change_time():
     """Get time remaining until next loop/display change."""
@@ -113,22 +154,15 @@ def get_next_change_time():
         if plugin_config:
             current_plugin_name = plugin_config.get("display_name", current_plugin_id)
 
-    # Determine next plugin from loop
+    # Determine next plugin from loop (uses pre-computed next for random mode)
     next_plugin_name = "Unknown"
     loop = loop_manager.determine_active_loop(datetime.now(refresh_info.get_refresh_datetime().tzinfo) if last_refresh else datetime.now())
     if loop and loop.plugin_order:
-        # Find current plugin in order
-        current_idx = next((i for i, ref in enumerate(loop.plugin_order) if ref.plugin_id == current_plugin_id), -1)
-        if current_idx >= 0:
-            # Current plugin is in the loop, get the next one
-            next_idx = (current_idx + 1) % len(loop.plugin_order)
-        else:
-            # Current plugin is not in the loop (manually displayed), next will be first in loop
-            next_idx = 0
-        next_plugin_id = loop.plugin_order[next_idx].plugin_id
-        next_plugin_config = device_config.get_plugin(next_plugin_id)
-        if next_plugin_config:
-            next_plugin_name = next_plugin_config.get("display_name", next_plugin_id)
+        next_ref = loop.peek_next_plugin()
+        if next_ref:
+            next_plugin_config = device_config.get_plugin(next_ref.plugin_id)
+            if next_plugin_config:
+                next_plugin_name = next_plugin_config.get("display_name", next_ref.plugin_id)
 
     if last_refresh:
         # Calculate seconds since last refresh

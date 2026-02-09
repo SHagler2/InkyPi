@@ -86,11 +86,8 @@
 
             if (!loopEnabled) {
                 countdownEl.textContent = 'Paused';
-                countdownEl.style.fontSize = '28px';
                 return;
             }
-
-            countdownEl.style.fontSize = '';
 
             if (countdownSeconds === -1) {
                 countdownEl.textContent = 'Loading...';
@@ -152,13 +149,57 @@
                 if (response.ok) {
                     loopToggle.dataset.enabled = newEnabled;
                     loopToggleLabel.textContent = newEnabled ? 'Enabled' : 'Disabled';
+                    loopEnabled = newEnabled;
                     updateLoopToggleStyle();
-                    alert(`Loop rotation ${newEnabled ? 'enabled' : 'disabled'}`);
+                    displayCountdown();
+                    updateCountdown();
                 } else {
                     alert('Error: ' + (result.error || 'Failed to toggle loop'));
                 }
             } catch (error) {
                 alert('Error toggling loop: ' + error.message);
+            }
+        }
+
+        async function skipToNext() {
+            const skipButton = document.getElementById('skipButton');
+            const countdownEl = document.getElementById('countdown');
+            skipButton.disabled = true;
+            skipButton.textContent = '...';
+            countdownEl.textContent = 'Skipping...';
+
+            try {
+                const response = await fetch('/api/skip_to_next', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const result = await response.json();
+                if (response.ok) {
+                    // Poll for update - refresh takes a few seconds
+                    let attempts = 0;
+                    const pollForUpdate = async () => {
+                        attempts++;
+                        await updateCountdown();
+                        // Keep polling until current plugin changes or max attempts
+                        if (attempts < 15) {
+                            setTimeout(pollForUpdate, 2000);
+                        } else {
+                            skipButton.disabled = false;
+                            skipButton.textContent = '▶';
+                        }
+                    };
+                    // Start polling after short delay
+                    setTimeout(pollForUpdate, 1000);
+                } else {
+                    alert('Error: ' + (result.error || 'Failed to skip'));
+                    skipButton.disabled = false;
+                    skipButton.textContent = '▶';
+                }
+            } catch (error) {
+                alert('Error skipping: ' + error.message);
+                skipButton.disabled = false;
+                skipButton.textContent = '▶';
             }
         }
     </script>
@@ -212,9 +253,13 @@
                     <span id="nextPlugin" style="font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap;">...</span>
                 </div>
                 <!-- Status/Countdown -->
-                <div class="countdown-display" style="display: flex; flex-direction: row; align-items: center; gap: 8px; flex-shrink: 0;">
-                    <span class="countdown-label" style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;">Changes in</span>
-                    <span id="countdown" style="font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap;">--:--</span>
+                <div class="countdown-display" style="display: flex; flex-direction: row; align-items: center; flex: 1; justify-content: flex-end;">
+                    <span class="countdown-label" style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; margin-right: 8px;">Changes in</span>
+                    <span id="countdown" style="font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap; width: 80px; text-align: right; display: inline-block;">--:--</span>
+                    <button id="skipButton" onclick="skipToNext()" title="Skip to next plugin"
+                            style="background: var(--accent-primary); color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; margin-left: 8px;">
+                        ▶
+                    </button>
                 </div>
             </div>
         </div>
