@@ -44,6 +44,7 @@ class AdaptiveImageLoader:
     - Fast in-memory loading on powerful devices
     - Automatic resizing with quality-appropriate filters
     - RGB conversion for e-ink compatibility
+    - Max image size protection to prevent OOM crashes
     - Comprehensive error handling and logging
 
     Usage:
@@ -57,8 +58,13 @@ class AdaptiveImageLoader:
         'User-Agent': 'InkyPi/1.0 (https://github.com/fatihak/InkyPi/) Python-requests'
     }
 
+    # Max image size limits (in megapixels) to prevent OOM crashes
+    MAX_MEGAPIXELS_LOW_RESOURCE = 20  # ~20MP max for Pi Zero (512MB RAM)
+    MAX_MEGAPIXELS_HIGH_RESOURCE = 100  # ~100MP max for Pi 3/4 (1-4GB RAM)
+
     def __init__(self):
         self.is_low_resource = _is_low_resource_device()
+        self.max_megapixels = self.MAX_MEGAPIXELS_LOW_RESOURCE if self.is_low_resource else self.MAX_MEGAPIXELS_HIGH_RESOURCE
 
     def from_url(self, url, dimensions, timeout_ms=40000, resize=True, headers=None, fit_mode='fill'):
         """
@@ -129,7 +135,16 @@ class AdaptiveImageLoader:
             img = Image.open(data)
             original_size = img.size
             original_pixels = original_size[0] * original_size[1]
-            logger.info(f"Loaded image: {original_size[0]}x{original_size[1]} ({img.mode} mode, {original_pixels/1_000_000:.1f}MP)")
+            megapixels = original_pixels / 1_000_000
+            logger.info(f"Loaded image: {original_size[0]}x{original_size[1]} ({img.mode} mode, {megapixels:.1f}MP)")
+
+            # Check if image exceeds safe size limit
+            if megapixels > self.max_megapixels:
+                logger.error(f"Image too large: {megapixels:.1f}MP exceeds {self.max_megapixels}MP limit")
+                logger.error(f"Skipping image to prevent out-of-memory crash")
+                img.close()
+                gc.collect()
+                return None
 
             if resize:
                 img = self._process_and_resize(img, dimensions, original_size, fit_mode)
@@ -213,7 +228,16 @@ class AdaptiveImageLoader:
             img = Image.open(path)
             original_size = img.size
             original_pixels = original_size[0] * original_size[1]
-            logger.info(f"Loaded image: {original_size[0]}x{original_size[1]} ({img.mode} mode, {original_pixels/1_000_000:.1f}MP)")
+            megapixels = original_pixels / 1_000_000
+            logger.info(f"Loaded image: {original_size[0]}x{original_size[1]} ({img.mode} mode, {megapixels:.1f}MP)")
+
+            # Check if image exceeds safe size limit
+            if megapixels > self.max_megapixels:
+                logger.error(f"Image too large: {megapixels:.1f}MP exceeds {self.max_megapixels}MP limit")
+                logger.error(f"Skipping image to prevent out-of-memory crash")
+                img.close()
+                gc.collect()
+                return None
 
             if resize:
                 # Apply draft mode for massive memory savings during decode
@@ -284,7 +308,16 @@ class AdaptiveImageLoader:
             img = Image.open(path)
             original_size = img.size
             original_pixels = original_size[0] * original_size[1]
-            logger.info(f"Loaded image: {original_size[0]}x{original_size[1]} ({img.mode} mode, {original_pixels/1_000_000:.1f}MP)")
+            megapixels = original_pixels / 1_000_000
+            logger.info(f"Loaded image: {original_size[0]}x{original_size[1]} ({img.mode} mode, {megapixels:.1f}MP)")
+
+            # Check if image exceeds safe size limit
+            if megapixels > self.max_megapixels:
+                logger.error(f"Image too large: {megapixels:.1f}MP exceeds {self.max_megapixels}MP limit")
+                logger.error(f"Skipping image to prevent out-of-memory crash")
+                img.close()
+                gc.collect()
+                return None
 
             if resize:
                 img = self._process_and_resize(img, dimensions, original_size, fit_mode)
