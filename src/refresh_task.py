@@ -34,6 +34,29 @@ class RefreshTask:
         self.refresh_counter = 0
         self.config_write_interval = 12  # Write every 12 refreshes (~1 hour at 5-min intervals)
 
+        # Auto-refresh tracking - load from config if available (survives restarts)
+        saved_auto_refresh = device_config.get_config("auto_refresh_tracking", default={})
+        self.auto_refresh_plugin_settings = saved_auto_refresh.get("plugin_settings")
+        last_time_str = saved_auto_refresh.get("last_display_time")
+        if last_time_str:
+            try:
+                self.last_display_time = datetime.fromisoformat(last_time_str)
+            except (ValueError, TypeError):
+                self.last_display_time = None
+        else:
+            self.last_display_time = None
+
+        # If no auto-refresh tracking but current plugin is stocks, restore from saved settings
+        if not self.auto_refresh_plugin_settings:
+            refresh_info = device_config.get_refresh_info()
+            if refresh_info and refresh_info.plugin_id == "stocks":
+                stocks_settings = device_config.get_config("stocks_plugin_settings", default={})
+                if stocks_settings.get("autoRefresh"):
+                    self.auto_refresh_plugin_settings = stocks_settings
+                    # Use current time as last display time so we refresh after the interval
+                    self.last_display_time = datetime.now(pytz.timezone(device_config.get_config("timezone", default="UTC")))
+                    logger.info(f"Restored auto-refresh tracking for stocks: {stocks_settings.get('autoRefresh')} min")
+
     def start(self):
         """Starts the background thread for refreshing the display."""
         if not self.thread or not self.thread.is_alive():
@@ -85,6 +108,18 @@ class RefreshTask:
                     loop_manager = self.device_config.get_loop_manager()
                     sleep_time = loop_manager.rotation_interval_seconds
 
+                    # Check if current plugin has auto-refresh - use shorter interval if so
+                    auto_refresh_seconds = self._get_auto_refresh_seconds()
+                    use_auto_refresh = False
+                    if auto_refresh_seconds:
+                        if auto_refresh_seconds < sleep_time:
+                            sleep_time = auto_refresh_seconds
+                            use_auto_refresh = True
+                            logger.info(f"Auto-refresh configured: {auto_refresh_seconds}s, using as sleep interval")
+                        else:
+                            use_auto_refresh = True  # Still want auto-refresh, but loop interval is shorter
+                            logger.info(f"Auto-refresh configured: {auto_refresh_seconds}s, but loop interval {sleep_time}s is shorter")
+
                     # Wait for sleep_time or until notified
                     self.condition.wait(timeout=sleep_time)
                     self.refresh_result = {}
@@ -108,19 +143,30 @@ class RefreshTask:
                         if self.device_config.get_config("log_system_stats"):
                             self.log_system_stats()
 
-                        # Check if loop rotation is enabled
-                        loop_enabled = self.device_config.get_config("loop_enabled", default=True)
-                        if not loop_enabled:
-                            logger.info("Loop rotation is disabled, skipping automatic refresh")
-                            continue
+                        # Check if we should auto-refresh the current plugin
+                        if use_auto_refresh and self._should_auto_refresh(current_dt):
+                            logger.info(f"Auto-refreshing current plugin: {latest_refresh.plugin_id}")
+                            refresh_action = AutoRefresh(latest_refresh.plugin_id, self.auto_refresh_plugin_settings)
+                        else:
+                            # Check if loop rotation is enabled
+                            loop_enabled = self.device_config.get_config("loop_enabled", default=True)
+                            if not loop_enabled:
+                                # Loop is disabled - but if auto-refresh is configured, we should
+                                # still wait for the next auto-refresh interval, not skip entirely
+                                if use_auto_refresh:
+                                    elapsed = (current_dt - self.last_display_time).total_seconds() if self.last_display_time else 0
+                                    logger.info(f"Loop disabled, auto-refresh waiting (elapsed: {elapsed:.0f}s / {self._get_auto_refresh_seconds()}s)")
+                                else:
+                                    logger.info("Loop rotation is disabled, no action needed")
+                                continue
 
-                        # handle refresh using loop mode
-                        logger.info(f"Running interval refresh check. | current_time: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+                            # handle refresh using loop mode
+                            logger.info(f"Running interval refresh check. | current_time: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}")
 
-                        loop_manager = self.device_config.get_loop_manager()
-                        loop, plugin_ref = self._determine_next_plugin_loop_mode(loop_manager, current_dt)
-                        if plugin_ref:
-                            refresh_action = LoopRefresh(loop, plugin_ref)
+                            loop_manager = self.device_config.get_loop_manager()
+                            loop, plugin_ref = self._determine_next_plugin_loop_mode(loop_manager, current_dt)
+                            if plugin_ref:
+                                refresh_action = LoopRefresh(loop, plugin_ref)
 
                     if refresh_action:
                         plugin_config = self.device_config.get_plugin(refresh_action.get_plugin_id())
@@ -142,6 +188,12 @@ class RefreshTask:
 
                         # update latest refresh data in the device config (in-memory only)
                         self.device_config.refresh_info = RefreshInfo(**refresh_info)
+
+                        # Track plugin settings for auto-refresh
+                        plugin_settings = getattr(refresh_action, 'plugin_settings', None)
+                        if plugin_settings is None and hasattr(refresh_action, 'plugin_reference'):
+                            plugin_settings = refresh_action.plugin_reference.plugin_settings
+                        self._update_auto_refresh_tracking(plugin_settings, current_dt)
 
                         # Batch config writes to reduce SD card wear
                         # Only write periodically, not on every refresh
@@ -221,6 +273,46 @@ class RefreshTask:
         tz_str = self.device_config.get_config("timezone", default="UTC")
         return datetime.now(pytz.timezone(tz_str))
 
+    def _get_auto_refresh_seconds(self):
+        """Check if the currently displayed plugin has auto-refresh configured.
+
+        Returns the auto-refresh interval in seconds, or None if not configured.
+        """
+        if not self.auto_refresh_plugin_settings:
+            return None
+
+        auto_refresh = self.auto_refresh_plugin_settings.get("autoRefresh")
+        if auto_refresh:
+            try:
+                minutes = int(auto_refresh)
+                if minutes > 0:
+                    return minutes * 60
+            except (ValueError, TypeError):
+                pass
+        return None
+
+    def _should_auto_refresh(self, current_dt):
+        """Check if we should auto-refresh the current plugin based on elapsed time."""
+        if not self.last_display_time or not self.auto_refresh_plugin_settings:
+            return False
+
+        auto_refresh_seconds = self._get_auto_refresh_seconds()
+        if not auto_refresh_seconds:
+            return False
+
+        elapsed = (current_dt - self.last_display_time).total_seconds()
+        return elapsed >= auto_refresh_seconds
+
+    def _update_auto_refresh_tracking(self, plugin_settings, current_dt):
+        """Update tracking for auto-refresh after displaying a plugin."""
+        self.auto_refresh_plugin_settings = plugin_settings or {}
+        self.last_display_time = current_dt
+        # Persist to config so it survives service restarts
+        self.device_config.update_value("auto_refresh_tracking", {
+            "plugin_settings": self.auto_refresh_plugin_settings,
+            "last_display_time": current_dt.isoformat() if current_dt else None
+        }, write=False)  # Don't write immediately, will be batched
+
     def _determine_next_plugin_loop_mode(self, loop_manager, current_dt):
         """Determines the next plugin to refresh in loop mode based on the active loop and rotation."""
         loop = loop_manager.determine_active_loop(current_dt)
@@ -272,6 +364,34 @@ class RefreshAction:
     def get_plugin_id(self):
         """Return the plugin ID associated with this refresh."""
         raise NotImplementedError("Subclasses must implement the get_plugin_id method.")
+
+class AutoRefresh(RefreshAction):
+    """Performs an auto-refresh of the currently displayed plugin.
+
+    Used when a plugin has auto-refresh configured to update its data
+    at a more frequent interval than the loop rotation.
+
+    Attributes:
+        plugin_id (str): The ID of the plugin to refresh.
+        plugin_settings (dict): The settings for the plugin.
+    """
+
+    def __init__(self, plugin_id: str, plugin_settings: dict):
+        self.plugin_id = plugin_id
+        self.plugin_settings = plugin_settings or {}
+
+    def execute(self, plugin, device_config, current_dt: datetime):
+        """Performs an auto-refresh using the stored plugin settings."""
+        return plugin.generate_image(self.plugin_settings, device_config)
+
+    def get_refresh_info(self):
+        """Return refresh metadata as a dictionary."""
+        return {"refresh_type": "Auto Refresh", "plugin_id": self.plugin_id}
+
+    def get_plugin_id(self):
+        """Return the plugin ID associated with this refresh."""
+        return self.plugin_id
+
 
 class ManualRefresh(RefreshAction):
     """Performs a manual refresh based on a plugin's ID and its associated settings.

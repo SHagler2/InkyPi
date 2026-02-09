@@ -13,8 +13,8 @@ FONT_SIZES = {
     "x-large": 1.5
 }
 
-COUNT_SCALES = {1: 1.6, 2: 1.3, 3: 1.0, 4: 0.85, 5: 0.75}
-GRID_COLUMNS = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 3}
+COUNT_SCALES = {1: 2.2, 2: 1.6, 3: 1.2, 4: 1.15, 5: 0.9, 6: 0.85}
+GRID_COLUMNS = {1: 1, 2: 2, 3: 3, 4: 2, 5: 3, 6: 3}
 
 
 def format_large_number(num):
@@ -42,14 +42,19 @@ class Stocks(BasePlugin):
         title = settings.get("title", "Stock Prices")
         tickers_input = settings.get("tickers", "")
 
-        if not tickers_input:
-            raise RuntimeError("At least one ticker symbol is required.")
+        # Get saved tickers from device config
+        saved_tickers_raw = device_config.get_config("stocks_saved_tickers", default=[])
+        # Extract symbols from saved tickers (handle both old string format and new dict format)
+        saved_tickers = [t["symbol"] if isinstance(t, dict) else t for t in saved_tickers_raw]
 
-        # Parse comma-separated tickers
-        tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+        # Parse comma-separated tickers from input (if any)
+        input_tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()] if tickers_input else []
+
+        # Use input tickers if provided, otherwise fall back to saved tickers
+        tickers = input_tickers if input_tickers else saved_tickers
 
         if not tickers:
-            raise RuntimeError("At least one valid ticker symbol is required.")
+            raise RuntimeError("No tickers configured. Add tickers in the plugin settings.")
 
         # Fetch stock data (limit to 6 tickers)
         stocks_data = self.fetch_stock_data(tickers[:6])
@@ -64,6 +69,13 @@ class Stocks(BasePlugin):
         stock_count = len(stocks_data)
         columns = GRID_COLUMNS.get(stock_count, 3)
         rows = (stock_count + columns - 1) // columns
+        # Get auto-refresh interval for display
+        auto_refresh = settings.get('autoRefresh', '0')
+        try:
+            auto_refresh_mins = int(auto_refresh)
+        except (ValueError, TypeError):
+            auto_refresh_mins = 0
+
         template_params = {
             "title": title,
             "stocks": stocks_data,
@@ -71,6 +83,7 @@ class Stocks(BasePlugin):
             "columns": columns,
             "rows": rows,
             "last_updated": datetime.now().strftime("%I:%M %p"),
+            "auto_refresh_mins": auto_refresh_mins,
             "font_scale": FONT_SIZES.get(settings.get('fontSize', 'normal'), 1),
             "count_scale": COUNT_SCALES.get(stock_count, 0.65),
             "plugin_settings": settings

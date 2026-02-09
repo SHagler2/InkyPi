@@ -52,19 +52,26 @@
             <div class="featured-image-card loop-item">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                     <div>
-                        <h2 style="margin: 0; font-size: 18px; font-weight: 600;">{{ loop_item.name }}</h2>
+                        <h2 style="margin: 0; font-size: 18px; font-weight: 600; color: var(--text-primary);">{{ loop_item.name }}</h2>
                         {% if loop_item.name == loop_config.active_loop %}
                         <span style="display: inline-block; margin-left: 10px; padding: 4px 10px; background: var(--success-color); color: white; border-radius: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">ACTIVE</span>
                         {% endif %}
                         <div style="margin-top: 6px; font-size: 13px; color: var(--text-secondary); font-weight: 400;">{{ loop_item.start_time }} - {{ loop_item.end_time }}</div>
                     </div>
-                    <div style="display: flex; gap: 8px;">
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button onclick="toggleRandomize('{{ loop_item.name }}')"
+                                id="randomize-{{ loop_item.name }}"
+                                class="action-button"
+                                style="padding: 8px 14px; font-size: 14px; font-weight: 500; background: {{ 'var(--success-color)' if loop_item.randomize else 'var(--button-bg)' }}; color: {{ 'white' if loop_item.randomize else 'var(--text-primary)' }};"
+                                title="Toggle random plugin order">
+                            {{ 'Random' if loop_item.randomize else 'Sequential' }}
+                        </button>
                         <button onclick="openEditLoopModal('{{ loop_item.name }}', '{{ loop_item.start_time }}', '{{ loop_item.end_time }}')"
-                                class="action-button" style="background: var(--button-bg); padding: 8px 14px; font-size: 14px; font-weight: 500;">
+                                class="action-button" style="background: var(--button-bg); padding: 8px 14px; font-size: 14px; font-weight: 500; color: var(--text-primary);">
                             Edit
                         </button>
                         <button onclick="deleteLoop('{{ loop_item.name }}')"
-                                class="action-button" style="background: var(--error-color); padding: 8px 14px; font-size: 14px; font-weight: 500;">
+                                class="action-button" style="background: #dc3545 !important; padding: 8px 14px; font-size: 14px; font-weight: 500; color: white !important;">
                             Delete
                         </button>
                     </div>
@@ -95,7 +102,7 @@
                             <button type="button"
                                     onclick="refreshPluginNow('{{ loop_item.name }}', '{{ plugin_ref.plugin_id }}')"
                                     class="action-button"
-                                    style="padding: 8px 14px; font-size: 14px; background: var(--accent-primary); font-weight: 500;"
+                                    style="padding: 6px 12px; font-size: 13px; background: var(--accent-primary) !important; font-weight: 500; color: white !important;"
                                     title="Refresh and display this screen now">
                                 ⟳ Now
                             </button>
@@ -105,12 +112,12 @@
                                     data-refresh-interval="{{ plugin_ref.refresh_interval_seconds }}"
                                     data-plugin-settings="{{ plugin_ref.plugin_settings | tojson | forceescape }}"
                                     class="edit-plugin-btn action-button"
-                                    style="padding: 8px 14px; font-size: 14px; background: var(--button-bg); font-weight: 500;">
+                                    style="padding: 6px 12px; font-size: 13px; background: var(--button-bg) !important; font-weight: 500; color: var(--text-primary) !important;">
                                 Edit
                             </button>
                             <button onclick="removePluginFromLoop('{{ loop_item.name }}', '{{ plugin_ref.plugin_id }}')"
                                     class="action-button"
-                                    style="padding: 8px 14px; font-size: 14px; background: var(--error-color); font-weight: 500;"
+                                    style="padding: 6px 12px; font-size: 13px; background: #dc3545 !important; font-weight: 500; color: white !important;"
                                     title="Remove this plugin from the loop">
                                 Remove
                             </button>
@@ -200,11 +207,17 @@
             <form id="editPluginForm">
                 <input type="hidden" id="editLoopName">
                 <input type="hidden" id="editPluginId">
-                <div style="margin: 15px 0; display: flex; justify-content: space-between; align-items: center;">
-                    <label>Plugin: <span id="editPluginName" style="font-weight: bold;"></span></label>
-                    <a id="fullSettingsLink" href="#" target="_blank" style="font-size: 12px; color: #007bff; text-decoration: none;">
-                        📋 Full Settings →
+                <div style="margin: 15px 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <label>Plugin: <span id="editPluginName" style="font-weight: bold;"></span></label>
+                    </div>
+                    <a id="fullSettingsLink" href="#" target="_blank"
+                       style="display: inline-block; margin-top: 10px; padding: 8px 16px; background: #17a2b8; color: white; border-radius: 4px; text-decoration: none; font-size: 14px;">
+                        ⚙️ Open Full Plugin Settings
                     </a>
+                    <div id="noInlineSettingsMsg" style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 4px; font-size: 13px; display: none;">
+                        Use the button above to configure all options for this plugin.
+                    </div>
                 </div>
                 <div style="margin: 15px 0;">
                     <label>Refresh Interval:</label>
@@ -351,6 +364,70 @@
                         <small style="display: block; margin-top: 5px; color: #666;">
                             Fit: Shows entire image with black bars if needed<br>
                             Fill: Crops edges to fill screen completely
+                        </small>
+                    </div>
+                </div>
+
+                <div id="aiImageSettings" style="margin: 15px 0; display: none;">
+                    <div style="margin: 10px 0;">
+                        <label>AI Provider:</label>
+                        <select id="aiImageProvider" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            <option value="gemini">Google Gemini (Imagen)</option>
+                            <option value="openai">OpenAI (DALL-E)</option>
+                        </select>
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <label>Text Prompt:</label>
+                        <input type="text" id="aiImagePrompt" placeholder="Describe the image to generate..." style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="aiImageRandomize" style="width: 20px; height: 20px;">
+                            <span>Randomize/enhance prompt</span>
+                        </label>
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="aiImageShowTitle" style="width: 20px; height: 20px;" checked>
+                            <span>Show prompt as title overlay</span>
+                        </label>
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <label>Display Mode:</label>
+                        <select id="aiImageFitMode" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            <option value="fit">Fit (Letterbox)</option>
+                            <option value="fill">Fill (Crop)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="aiTextSettings" style="margin: 15px 0; display: none;">
+                    <div style="margin: 10px 0;">
+                        <label>AI Provider:</label>
+                        <select id="aiTextProvider" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            <option value="gemini">Google Gemini</option>
+                            <option value="openai">OpenAI</option>
+                        </select>
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <label>Text Prompt:</label>
+                        <input type="text" id="aiTextPrompt" placeholder="e.g., Tell me a joke, Quote of the day..." style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <label>Title (optional):</label>
+                        <input type="text" id="aiTextTitle" placeholder="Leave blank to auto-generate from prompt" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                    </div>
+                </div>
+
+                <div id="stocksSettings" style="margin: 15px 0; display: none;">
+                    <div style="margin: 10px 0;">
+                        <label>Auto-Refresh Prices:</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="number" id="stocksAutoRefresh" min="0" max="1440" value="0" style="width: 80px; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            <span style="color: #666;">minutes (0 = disabled)</span>
+                        </div>
+                        <small style="display: block; margin-top: 5px; color: #666;">
+                            While stocks is displayed, refresh prices at this interval.
                         </small>
                     </div>
                 </div>

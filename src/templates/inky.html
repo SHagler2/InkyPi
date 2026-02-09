@@ -49,6 +49,7 @@
 
         // Countdown timer
         let countdownSeconds = -1; // -1 means not yet loaded
+        let loopEnabled = true;
 
         async function updateCountdown() {
             try {
@@ -56,26 +57,40 @@
                 const data = await response.json();
                 if (data.success) {
                     countdownSeconds = data.remaining_seconds;
+                    loopEnabled = data.loop_enabled !== false;
 
                     // Update plugin names
                     const currentPluginEl = document.getElementById('currentPlugin');
                     const nextPluginEl = document.getElementById('nextPlugin');
+                    const countdownLabelEl = document.querySelector('.countdown-display .countdown-label');
+
                     if (currentPluginEl && data.current_plugin) {
                         currentPluginEl.textContent = data.current_plugin;
                     }
-                    if (nextPluginEl && data.next_plugin) {
-                        nextPluginEl.textContent = data.next_plugin;
+                    if (nextPluginEl) {
+                        nextPluginEl.textContent = loopEnabled ? (data.next_plugin || '...') : '-';
+                    }
+                    if (countdownLabelEl) {
+                        countdownLabelEl.textContent = loopEnabled ? 'Changes in' : 'Status';
                     }
                 }
             } catch (error) {
                 console.error('Error fetching countdown:', error);
-                countdownSeconds = 0; // Show "Changing..." on error
+                countdownSeconds = 0;
             }
         }
 
         function displayCountdown() {
             const countdownEl = document.getElementById('countdown');
             if (!countdownEl) return;
+
+            if (!loopEnabled) {
+                countdownEl.textContent = 'Paused';
+                countdownEl.style.fontSize = '28px';
+                return;
+            }
+
+            countdownEl.style.fontSize = '';
 
             if (countdownSeconds === -1) {
                 countdownEl.textContent = 'Loading...';
@@ -94,6 +109,19 @@
             countdownSeconds = Math.max(0, countdownSeconds - 1);
         }
 
+        function updateLoopToggleStyle() {
+            const loopToggle = document.getElementById('loopToggle');
+            if (!loopToggle) return;
+            const enabled = loopToggle.dataset.enabled === 'true';
+            if (enabled) {
+                loopToggle.style.background = '#28a745';
+                loopToggle.style.color = 'white';
+            } else {
+                loopToggle.style.background = '#dc3545';
+                loopToggle.style.color = 'white';
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             refreshImage();
             setInterval(refreshImage, refreshIntervalMs);
@@ -104,19 +132,7 @@
             setInterval(updateCountdown, 30000); // Refresh from server every 30 seconds
 
             // Initialize loop toggle button style
-            const loopToggle = document.getElementById('loopToggle');
             updateLoopToggleStyle();
-
-            function updateLoopToggleStyle() {
-                const enabled = loopToggle.dataset.enabled === 'true';
-                if (enabled) {
-                    loopToggle.style.background = '#28a745';
-                    loopToggle.style.color = 'white';
-                } else {
-                    loopToggle.style.background = '#dc3545';
-                    loopToggle.style.color = 'white';
-                }
-            }
         });
 
         async function toggleLoop() {
@@ -171,32 +187,34 @@
         </header>
 
         <!-- Status Dashboard Card -->
-        <div class="status-dashboard-card">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
-                <span class="countdown-label" style="font-size: 13px; text-transform: none;">Loop Rotation</span>
-                <button id="loopToggle"
-                        class="mode-toggle-btn"
-                        data-enabled="{{ loop_enabled | default(true) | tojson }}"
-                        onclick="toggleLoop()"
-                        title="Click to enable/disable loop rotation"
-                        style="padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold;">
-                    <span id="loopToggleLabel">{{ 'Enabled' if loop_enabled | default(true) else 'Disabled' }}</span>
-                </button>
-            </div>
-            <div class="countdown-section">
-                <div class="plugin-info">
-                    <div class="plugin-info-item current">
-                        <span class="plugin-info-label">Current</span>
-                        <span id="currentPlugin" class="plugin-info-value">...</span>
-                    </div>
-                    <div class="plugin-info-item next">
-                        <span class="plugin-info-label">Next</span>
-                        <span id="nextPlugin" class="plugin-info-value">...</span>
-                    </div>
+        <div class="status-dashboard-card" style="padding: 12px 16px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+                <!-- Loop Toggle -->
+                <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+                    <span style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Loop</span>
+                    <button id="loopToggle"
+                            class="mode-toggle-btn"
+                            data-enabled="{{ loop_enabled | default(true) | tojson }}"
+                            onclick="toggleLoop()"
+                            title="Click to enable/disable loop rotation"
+                            style="padding: 6px 14px; border-radius: 4px; border: none; cursor: pointer; font-weight: 600; font-size: 13px;">
+                        <span id="loopToggleLabel">{{ 'Enabled' if loop_enabled | default(true) else 'Disabled' }}</span>
+                    </button>
                 </div>
-                <div class="countdown-display">
-                    <span class="countdown-label">Changes in</span>
-                    <span id="countdown" class="countdown-value">--:--</span>
+                <!-- Current Plugin -->
+                <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+                    <span style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">Current</span>
+                    <span id="currentPlugin" style="font-size: 14px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
+                </div>
+                <!-- Next Plugin -->
+                <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                    <span style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Next</span>
+                    <span id="nextPlugin" style="font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap;">...</span>
+                </div>
+                <!-- Status/Countdown -->
+                <div class="countdown-display" style="display: flex; flex-direction: row; align-items: center; gap: 8px; flex-shrink: 0;">
+                    <span class="countdown-label" style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;">Changes in</span>
+                    <span id="countdown" style="font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap;">--:--</span>
                 </div>
             </div>
         </div>

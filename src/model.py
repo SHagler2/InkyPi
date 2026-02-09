@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import random
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -170,14 +171,16 @@ class Loop:
         end_time (str): Loop end time in 'HH:MM'.
         plugin_order (list): Ordered list of PluginReference objects.
         current_plugin_index (int): Index of the currently displayed plugin.
+        randomize (bool): If True, randomly select next plugin instead of sequential order.
     """
 
-    def __init__(self, name, start_time, end_time, plugin_order=None, current_plugin_index=None):
+    def __init__(self, name, start_time, end_time, plugin_order=None, current_plugin_index=None, randomize=False):
         self.name = name
         self.start_time = start_time
         self.end_time = end_time
         self.plugin_order = [PluginReference.from_dict(p) for p in (plugin_order or [])]
         self.current_plugin_index = current_plugin_index
+        self.randomize = randomize
 
         # Cache time range calculation to avoid repeated string parsing
         self._cached_time_range_minutes = None
@@ -224,14 +227,30 @@ class Loop:
         self.plugin_order = new_order
 
     def get_next_plugin(self):
-        """Returns the next plugin reference in rotation."""
+        """Returns the next plugin reference in rotation.
+
+        If randomize is enabled, selects a random plugin (avoiding the current one if possible).
+        Otherwise, cycles through plugins sequentially.
+        """
         if not self.plugin_order:
             return None
 
-        if self.current_plugin_index is None:
-            self.current_plugin_index = 0
+        if self.randomize:
+            # Random selection - try to avoid repeating the same plugin
+            if len(self.plugin_order) == 1:
+                self.current_plugin_index = 0
+            elif self.current_plugin_index is not None:
+                # Pick a random index different from current
+                available_indices = [i for i in range(len(self.plugin_order)) if i != self.current_plugin_index]
+                self.current_plugin_index = random.choice(available_indices)
+            else:
+                self.current_plugin_index = random.randint(0, len(self.plugin_order) - 1)
         else:
-            self.current_plugin_index = (self.current_plugin_index + 1) % len(self.plugin_order)
+            # Sequential rotation
+            if self.current_plugin_index is None:
+                self.current_plugin_index = 0
+            else:
+                self.current_plugin_index = (self.current_plugin_index + 1) % len(self.plugin_order)
 
         return self.plugin_order[self.current_plugin_index]
 
@@ -269,7 +288,8 @@ class Loop:
             "start_time": self.start_time,
             "end_time": self.end_time,
             "plugin_order": [ref.to_dict() for ref in self.plugin_order],
-            "current_plugin_index": self.current_plugin_index
+            "current_plugin_index": self.current_plugin_index,
+            "randomize": self.randomize
         }
 
     @classmethod
@@ -279,7 +299,8 @@ class Loop:
             start_time=data["start_time"],
             end_time=data["end_time"],
             plugin_order=data.get("plugin_order", []),
-            current_plugin_index=data.get("current_plugin_index")
+            current_plugin_index=data.get("current_plugin_index"),
+            randomize=data.get("randomize", False)
         )
 
 

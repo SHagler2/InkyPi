@@ -28,6 +28,8 @@
         const pluginSettings = {{ plugin_settings | tojson if plugin_settings else {} }};
         const loadPluginSettings = Object.keys(pluginSettings).length > 0;
         const styleSettings = {{ style_settings | default(false) | tojson }};
+        const loopEditMode = {{ loop_edit_mode | default(false) | tojson }};
+        const loopName = {{ loop_name | default('') | tojson }};
 
         let uploadedFiles = {};
 
@@ -65,6 +67,38 @@
                 formData.append("loop_name", loopFormData.get("loop_name"));
                 formData.append("refresh_interval_seconds", intervalSeconds);
                 clearFormOnSubmit = true
+            } else if (action == "save_to_loop") {
+                // Convert form data to JSON for update_plugin_settings endpoint
+                const settings = {};
+                formData.forEach((value, key) => {
+                    if (key !== 'plugin_id') {
+                        settings[key] = value;
+                    }
+                });
+
+                try {
+                    const response = await fetch('{{ url_for("loops.update_plugin_settings") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            loop_name: loopName,
+                            plugin_id: '{{ plugin.id }}',
+                            plugin_settings: settings
+                        })
+                    });
+                    const result = await response.json();
+                    if (response.ok) {
+                        showResponseModal('success', `Success! Settings saved to loop "${loopName}"`);
+                    } else {
+                        showResponseModal('failure', `Error! ${result.error}`);
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    showResponseModal('failure', 'An error occurred while saving settings.');
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                }
+                return; // Exit early for save_to_loop
             }
 
             // Send data to the server
@@ -370,8 +404,12 @@
             <input type="hidden" name="plugin_id" value="{{ plugin.id }}">
 
             <div class="buttons-container">
+                {% if loop_edit_mode %}
+                <button type="button" onclick="handleAction('save_to_loop')" class="action-button" style="width: 100%;">Save Settings to "{{ loop_name }}"</button>
+                {% else %}
                 <button type="button" onclick="handleAction()" class="action-button left">Update Now</button>
                 <button type="button" onclick="openModal('scheduleModal')" class="action-button right">Add to Loop</button>
+                {% endif %}
             </div>
         </form>
     </div>

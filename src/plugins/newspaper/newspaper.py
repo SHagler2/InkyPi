@@ -1,6 +1,5 @@
 from plugins.base_plugin.base_plugin import BasePlugin
 from datetime import datetime, timedelta
-from utils.image_loader import AdaptiveImageLoader
 from PIL import Image
 import logging
 from plugins.newspaper.constants import NEWSPAPERS
@@ -28,12 +27,11 @@ class Newspaper(BasePlugin):
             dimensions = dimensions[::-1]
 
         image = None
-        loader = AdaptiveImageLoader(device_config)
         for date in days:
             image_url = FREEDOM_FORUM_URL.format(date.day, newspaper_slug)
             try:
                 # Use AdaptiveImageLoader for memory-efficient loading
-                image = loader.from_url(image_url, dimensions, mode='fit')
+                image = self.image_loader.from_url(image_url, dimensions, fit_mode='fit')
                 if image:
                     logger.info(f"Found {newspaper_slug} front cover for {date.strftime('%Y-%m-%d')}")
                     break

@@ -1,6 +1,6 @@
 from plugins.base_plugin.base_plugin import BasePlugin
 from openai import OpenAI
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import base64
 from utils.http_client import get_http_session
@@ -8,92 +8,243 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-IMAGE_MODELS = ["dall-e-3", "dall-e-2", "gpt-image-1"]
-DEFAULT_IMAGE_MODEL = "dall-e-3"
-DEFAULT_IMAGE_QUALITY = "standard"
+# OpenAI models
+OPENAI_IMAGE_MODELS = ["dall-e-3", "dall-e-2", "gpt-image-1"]
+DEFAULT_OPENAI_MODEL = "dall-e-3"
+
+# Gemini models
+GEMINI_IMAGE_MODELS = ["imagen-4.0-generate-001", "imagen-4.0-fast-generate-001", "imagen-4.0-ultra-generate-001"]
+DEFAULT_GEMINI_MODEL = "imagen-4.0-generate-001"
+
 
 class AIImage(BasePlugin):
     def generate_settings_template(self):
         template_params = super().generate_settings_template()
+        # Don't require a specific key - user chooses provider
         template_params['api_key'] = {
-            "required": True,
-            "service": "OpenAI",
-            "expected_key": "OPEN_AI_SECRET"
+            "required": False,
+            "service": "OpenAI or Google Gemini",
+            "expected_key": "OPEN_AI_SECRET or GOOGLE_GEMINI_SECRET"
         }
         return template_params
 
     def generate_image(self, settings, device_config):
         logger.info("=== AI Image Plugin: Starting image generation ===")
 
-        api_key = device_config.load_env_key("OPEN_AI_SECRET")
-        if not api_key:
-            logger.error("OpenAI API Key not configured")
-            raise RuntimeError("OPEN AI API Key not configured.")
-
-        # Sanitize API key to ASCII (fixes copy/paste issues with special characters)
-        api_key = api_key.encode('ascii', errors='ignore').decode('ascii').strip()
-
+        provider = settings.get("provider", "openai")
         text_prompt = settings.get("textPrompt", "")
-        image_model = settings.get('imageModel', DEFAULT_IMAGE_MODEL)
-
-        if image_model not in IMAGE_MODELS:
-            logger.error(f"Invalid image model: {image_model}")
-            raise RuntimeError("Invalid Image Model provided.")
-
-        image_quality = settings.get('quality', "medium" if image_model == "gpt-image-1" else "standard")
         randomize_prompt = settings.get('randomizePrompt') == 'true'
         orientation = device_config.get_config("orientation")
 
-        logger.info(f"Settings: model={image_model}, quality={image_quality}, orientation={orientation}")
+        logger.info(f"Provider: {provider}, orientation: {orientation}")
         logger.debug(f"Original prompt: '{text_prompt}'")
         logger.debug(f"Randomize prompt: {randomize_prompt}")
 
         image = None
-        try:
-            ai_client = OpenAI(api_key = api_key)
+        final_prompt = text_prompt  # Track the actual prompt used
 
-            if randomize_prompt:
-                logger.debug("Generating randomized prompt using GPT-4...")
-                text_prompt = AIImage.fetch_image_prompt(ai_client, text_prompt)
-                # Sanitize randomized prompt to ASCII
-                text_prompt = text_prompt.encode('ascii', errors='ignore').decode('ascii')
-                logger.info(f"Randomized prompt: '{text_prompt}'")
+        if provider == "gemini":
+            image, final_prompt = self._generate_with_gemini(settings, device_config, text_prompt, randomize_prompt, orientation)
+        else:
+            image, final_prompt = self._generate_with_openai(settings, device_config, text_prompt, randomize_prompt, orientation)
 
-            logger.info(f"Generating image with {image_model}...")
-            image = self.fetch_image(
-                ai_client,
-                text_prompt,
-                model=image_model,
-                quality=image_quality,
-                orientation=orientation
-            )
+        if image:
+            logger.info(f"AI image generated successfully: {image.size[0]}x{image.size[1]}")
 
-            if image:
-                logger.info(f"AI image generated successfully: {image.size[0]}x{image.size[1]}")
+            # Resize to display dimensions with letterboxing
+            dimensions = device_config.get_resolution()
+            if orientation == "vertical":
+                dimensions = dimensions[::-1]
 
-                # Resize to display dimensions with letterboxing
-                dimensions = device_config.get_resolution()
-                if orientation == "vertical":
-                    dimensions = dimensions[::-1]
+            # Get fit mode setting (default to 'fit' for letterbox)
+            fit_mode = settings.get("fitMode", "fit")
+            logger.debug(f"Resizing to {dimensions} with fit_mode={fit_mode}")
 
-                # Get fit mode setting (default to 'fit' for letterbox)
-                fit_mode = settings.get("fitMode", "fit")
-                logger.debug(f"Resizing to {dimensions} with fit_mode={fit_mode}")
+            image = self.image_loader.resize_image(image, dimensions, fit_mode=fit_mode)
 
-                image = self.image_loader.resize_image(image, dimensions, fit_mode=fit_mode)
-
-        except Exception as e:
-            logger.error(f"Failed to make OpenAI request: {str(e)}")
-            raise RuntimeError("Open AI request failure, please check logs.")
+            # Add title overlay using the final prompt
+            show_title = settings.get("showTitle", "true") != "false"
+            if show_title and final_prompt:
+                title = final_prompt.strip()
+                image = self._add_title_overlay(image, title)
+                logger.info(f"Added title overlay: {title}")
 
         logger.info("=== AI Image Plugin: Image generation complete ===")
         return image
 
-    def fetch_image(self, ai_client, prompt, model="dall-e-3", quality="standard", orientation="horizontal"):
-        """
-        Fetch image from OpenAI API. Now an instance method to access image_loader.
-        """
-        # Sanitize prompt to ASCII to avoid httpx encoding errors
+    def _add_title_overlay(self, image: Image.Image, title: str) -> Image.Image:
+        """Add title text overlay at the bottom of the image using full width."""
+        img_with_overlay = image.copy()
+        draw = ImageDraw.Draw(img_with_overlay, 'RGBA')
+
+        width, height = img_with_overlay.size
+        padding = 10
+        max_text_width = width - (padding * 2)
+
+        # Start with a reasonable font size and scale down if needed
+        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        target_font_size = max(14, int(height * 0.03))
+
+        try:
+            font = ImageFont.truetype(font_path, target_font_size)
+        except Exception:
+            font = ImageFont.load_default()
+            target_font_size = 12
+
+        # Check if text fits, reduce font size if needed
+        bbox = draw.textbbox((0, 0), title, font=font)
+        text_width = bbox[2] - bbox[0]
+
+        while text_width > max_text_width and target_font_size > 10:
+            target_font_size -= 1
+            try:
+                font = ImageFont.truetype(font_path, target_font_size)
+            except Exception:
+                break
+            bbox = draw.textbbox((0, 0), title, font=font)
+            text_width = bbox[2] - bbox[0]
+
+        # If still too long, truncate with ellipsis
+        display_title = title
+        if text_width > max_text_width:
+            while text_width > max_text_width and len(display_title) > 10:
+                display_title = display_title[:-4] + "..."
+                bbox = draw.textbbox((0, 0), display_title, font=font)
+                text_width = bbox[2] - bbox[0]
+
+        # Get final text dimensions
+        bbox = draw.textbbox((0, 0), display_title, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+
+        # Draw full-width semi-transparent background bar
+        bar_height = text_height + (padding * 2)
+        bar_top = height - bar_height
+        draw.rectangle([0, bar_top, width, height], fill=(0, 0, 0, 180))
+
+        # Center text in the bar
+        x = (width - text_width) // 2
+        y = bar_top + padding
+
+        # Draw text
+        draw.text((x, y), display_title, font=font, fill=(255, 255, 255, 255))
+
+        return img_with_overlay
+
+    def _generate_with_openai(self, settings, device_config, text_prompt, randomize_prompt, orientation):
+        """Generate image using OpenAI DALL-E."""
+        api_key = device_config.load_env_key("OPEN_AI_SECRET")
+        if not api_key:
+            logger.error("OpenAI API Key not configured")
+            raise RuntimeError("OpenAI API Key not configured. Add OPEN_AI_SECRET in Settings > API Keys.")
+
+        # Sanitize API key to ASCII (fixes copy/paste issues with special characters)
+        api_key = api_key.encode('ascii', errors='ignore').decode('ascii').strip()
+
+        image_model = settings.get('imageModel', DEFAULT_OPENAI_MODEL)
+        if image_model not in OPENAI_IMAGE_MODELS:
+            logger.error(f"Invalid OpenAI image model: {image_model}")
+            raise RuntimeError("Invalid Image Model provided.")
+
+        image_quality = settings.get('quality', "medium" if image_model == "gpt-image-1" else "standard")
+
+        logger.info(f"OpenAI Settings: model={image_model}, quality={image_quality}")
+
+        try:
+            ai_client = OpenAI(api_key=api_key)
+
+            if randomize_prompt:
+                logger.debug("Generating randomized prompt using GPT-4...")
+                text_prompt = self._fetch_openai_prompt(ai_client, text_prompt)
+                text_prompt = text_prompt.encode('ascii', errors='ignore').decode('ascii')
+                logger.info(f"Randomized prompt: '{text_prompt}'")
+
+            logger.info(f"Generating image with {image_model}...")
+            image = self._fetch_openai_image(ai_client, text_prompt, image_model, image_quality, orientation)
+            return image, text_prompt
+
+        except Exception as e:
+            logger.error(f"Failed to make OpenAI request: {str(e)}")
+            raise RuntimeError("OpenAI request failure, please check logs.")
+
+    def _generate_with_gemini(self, settings, device_config, text_prompt, randomize_prompt, orientation):
+        """Generate image using Google Gemini Imagen."""
+        api_key = device_config.load_env_key("GOOGLE_GEMINI_SECRET")
+        if not api_key:
+            logger.error("Google Gemini API Key not configured")
+            raise RuntimeError("Google Gemini API Key not configured. Add GOOGLE_GEMINI_SECRET in Settings > API Keys.")
+
+        # Sanitize API key
+        api_key = api_key.encode('ascii', errors='ignore').decode('ascii').strip()
+
+        image_model = settings.get('geminiImageModel', DEFAULT_GEMINI_MODEL)
+
+        logger.info(f"Gemini Settings: model={image_model}")
+
+        try:
+            from google import genai
+
+            client = genai.Client(api_key=api_key)
+
+            if randomize_prompt:
+                logger.debug("Generating randomized prompt using Gemini...")
+                text_prompt = self._fetch_gemini_prompt(client, text_prompt)
+                logger.info(f"Randomized prompt: '{text_prompt}'")
+
+            # Add style hints for e-ink display
+            enhanced_prompt = text_prompt + (
+                ". The image should fully occupy the entire canvas without any frames, "
+                "borders, or cropped areas. No blank spaces or artificial framing. "
+                "Focus on simplicity, bold shapes, and strong contrast to enhance clarity "
+                "and visual appeal. Avoid excessive detail or complex gradients, ensuring "
+                "the design works well with flat, vibrant colors."
+            )
+
+            logger.info(f"Generating image with Gemini {image_model}...")
+
+            # Determine aspect ratio based on orientation
+            if orientation == "horizontal":
+                aspect_ratio = "16:9"
+            else:
+                aspect_ratio = "9:16"
+
+            result = client.models.generate_images(
+                model=image_model,
+                prompt=enhanced_prompt,
+                config={
+                    "number_of_images": 1,
+                    "aspect_ratio": aspect_ratio,
+                }
+            )
+
+            if result.generated_images:
+                # Get the first image
+                img_data = result.generated_images[0].image
+                # Convert to PIL Image
+                img = Image.open(BytesIO(img_data.image_bytes))
+                return img, text_prompt
+            else:
+                raise RuntimeError("Gemini returned no images")
+
+        except ImportError:
+            logger.error("google-genai package not installed")
+            raise RuntimeError("Google Gemini SDK not installed. Run: pip install google-genai")
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Failed to make Gemini request: {error_msg}")
+
+            # Provide user-friendly error messages
+            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                raise RuntimeError("Gemini rate limit reached. Please wait a minute and try again, or try a different model.")
+            elif "API_KEY" in error_msg.upper() or "401" in error_msg:
+                raise RuntimeError("Gemini API key is invalid. Please check your GOOGLE_GEMINI_SECRET in Settings > API Keys.")
+            elif "404" in error_msg:
+                raise RuntimeError("Gemini model not found. Please select a different model.")
+            else:
+                raise RuntimeError(f"Gemini error: {error_msg[:100]}")
+
+    def _fetch_openai_image(self, ai_client, prompt, model, quality, orientation):
+        """Fetch image from OpenAI API."""
         prompt = prompt.encode('ascii', errors='ignore').decode('ascii')
 
         logger.info(f"Generating image for prompt: {prompt}, model: {model}, quality: {quality}")
@@ -106,6 +257,7 @@ class AIImage(BasePlugin):
             "and visual appeal. Avoid excessive detail or complex gradients, ensuring "
             "the design works well with flat, vibrant colors."
         )
+
         args = {
             "model": model,
             "prompt": prompt,
@@ -121,8 +273,6 @@ class AIImage(BasePlugin):
         response = ai_client.images.generate(**args)
         if model in ["dall-e-3", "dall-e-2"]:
             image_url = response.data[0].url
-            # Use adaptive loader for memory-efficient processing
-            # AI images are pre-sized, but still benefit from optimized loading
             session = get_http_session()
             response = session.get(image_url)
             img = Image.open(BytesIO(response.content))
@@ -132,9 +282,9 @@ class AIImage(BasePlugin):
             img = Image.open(BytesIO(image_bytes))
         return img
 
-    @staticmethod
-    def fetch_image_prompt(ai_client, from_prompt=None):
-        logger.info("Getting random image prompt...")
+    def _fetch_openai_prompt(self, ai_client, from_prompt=None):
+        """Generate a creative prompt using OpenAI."""
+        logger.info("Getting random image prompt from OpenAI...")
 
         system_content = (
             "You are a creative assistant generating extremely random and unique image prompts. "
@@ -169,22 +319,44 @@ class AIImage(BasePlugin):
                 "Avoid changing the subject of the prompt."
             )
 
-        # Make the API call
         response = ai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {
-                    "role": "system",
-                    "content": system_content
-                },
-                {
-                    "role": "user",
-                    "content": user_content
-                }
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content}
             ],
             temperature=1
         )
 
         prompt = response.choices[0].message.content.strip()
+        logger.info(f"Generated random image prompt: {prompt}")
+        return prompt
+
+    def _fetch_gemini_prompt(self, client, from_prompt=None):
+        """Generate a creative prompt using Gemini."""
+        logger.info("Getting random image prompt from Gemini...")
+
+        if from_prompt and from_prompt.strip():
+            prompt_request = (
+                f"Take this image description: \"{from_prompt}\"\n"
+                "Rewrite it to make it more detailed, imaginative, and unique while staying "
+                "true to the original idea. Include vivid imagery and descriptive details. "
+                "Focus on unexpected, unconventional, and bizarre combinations of art style, "
+                "medium, subjects, time periods, and moods. Keep it 20 words or less. "
+                "Just provide the prompt, no explanation."
+            )
+        else:
+            prompt_request = (
+                "Generate a completely random and unique image prompt. Focus on unexpected, "
+                "unconventional, and bizarre combinations of art style, medium, subjects, "
+                "time periods, and moods. Include a random artist, movie, tv show or time period. "
+                "Keep it 20 words or less. Just provide the prompt, no explanation."
+            )
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt_request
+        )
+        prompt = response.text.strip()
         logger.info(f"Generated random image prompt: {prompt}")
         return prompt

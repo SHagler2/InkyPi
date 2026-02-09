@@ -24,7 +24,7 @@ class Comic(BasePlugin):
         logger.info(f"Fetching comic: {comic}")
 
         is_caption = settings.get("titleCaption") == "true"
-        caption_font_size = settings.get("fontSize")
+        caption_font_size = settings.get("fontSize") or 24  # Default font size
 
         logger.debug(f"Settings: show_caption={is_caption}, font_size={caption_font_size}")
 

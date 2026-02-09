@@ -120,11 +120,15 @@ def get_next_change_time():
         # Find current plugin in order
         current_idx = next((i for i, ref in enumerate(loop.plugin_order) if ref.plugin_id == current_plugin_id), -1)
         if current_idx >= 0:
+            # Current plugin is in the loop, get the next one
             next_idx = (current_idx + 1) % len(loop.plugin_order)
-            next_plugin_id = loop.plugin_order[next_idx].plugin_id
-            next_plugin_config = device_config.get_plugin(next_plugin_id)
-            if next_plugin_config:
-                next_plugin_name = next_plugin_config.get("display_name", next_plugin_id)
+        else:
+            # Current plugin is not in the loop (manually displayed), next will be first in loop
+            next_idx = 0
+        next_plugin_id = loop.plugin_order[next_idx].plugin_id
+        next_plugin_config = device_config.get_plugin(next_plugin_id)
+        if next_plugin_config:
+            next_plugin_name = next_plugin_config.get("display_name", next_plugin_id)
 
     if last_refresh:
         # Calculate seconds since last refresh
@@ -135,8 +139,12 @@ def get_next_change_time():
         # No refresh yet, assume full interval remaining
         remaining = interval_seconds
 
+    # Check if loop is enabled
+    loop_enabled = device_config.get_config("loop_enabled", default=True)
+
     return jsonify({
         "success": True,
+        "loop_enabled": loop_enabled,
         "interval_seconds": interval_seconds,
         "remaining_seconds": int(remaining),
         "next_change_in": format_time(int(remaining)),

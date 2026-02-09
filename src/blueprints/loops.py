@@ -208,6 +208,30 @@ def update_plugin_settings():
 
     return jsonify({"success": True, "message": "Plugin settings updated"})
 
+@loops_bp.route('/toggle_loop_randomize', methods=['POST'])
+def toggle_loop_randomize():
+    """Toggle randomize setting for a loop"""
+    device_config = current_app.config['DEVICE_CONFIG']
+    loop_manager = device_config.get_loop_manager()
+
+    data = request.json
+    loop_name = data.get("loop_name")
+
+    loop = loop_manager.get_loop(loop_name)
+    if not loop:
+        return jsonify({"error": "Loop not found"}), 404
+
+    # Toggle the randomize setting
+    loop.randomize = not loop.randomize
+    device_config.write_config()
+
+    status = "Random" if loop.randomize else "Sequential"
+    return jsonify({
+        "success": True,
+        "randomize": loop.randomize,
+        "message": f"Loop '{loop_name}' now uses {status} order"
+    })
+
 @loops_bp.route('/search_city', methods=['POST'])
 def search_city():
     """Search for cities using geocoding API"""
