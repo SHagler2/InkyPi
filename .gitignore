@@ -175,3 +175,6 @@ mock_display_output/
 
 # Internal working documents (personal use)
 .internal/
+
+# Generated files
+*.pdf
