@@ -2,9 +2,136 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{{ config.name }}</title>
+
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="InkyPi">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+
     <link rel="stylesheet" type="text/css" href="{{ url_for('static',filename='styles/main.css') }}">
+
+    <!-- Mobile-responsive status dashboard -->
+    <style>
+        .status-row {
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }
+        .status-left {
+            width: 65%;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            min-width: 0;
+            flex-shrink: 0;
+        }
+        .status-right {
+            width: 35%;
+            position: relative;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            padding-left: 16px;
+            padding-right: 40px;
+            flex-shrink: 0;
+        }
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+        .status-item.flex-1 {
+            flex: 1;
+        }
+        .status-item.no-shrink {
+            flex-shrink: 0;
+            gap: 10px;
+        }
+        .status-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+        .status-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Mobile responsive - stack on small screens */
+        @media (max-width: 768px) {
+            .status-row {
+                flex-wrap: wrap !important;
+                gap: 12px !important;
+            }
+            .status-left {
+                width: 100% !important;
+                flex-wrap: wrap !important;
+                gap: 10px !important;
+            }
+            .status-right {
+                width: 100% !important;
+                padding-left: 0 !important;
+                padding-right: 50px !important;
+                justify-content: flex-start !important;
+                flex-direction: row !important;
+                border-left: none !important;
+            }
+            .status-item {
+                gap: 6px !important;
+            }
+            .status-item.flex-1 {
+                flex: 0 1 auto !important;
+                max-width: 45% !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .status-left {
+                gap: 8px !important;
+            }
+            .status-item.no-shrink {
+                width: 100% !important;
+            }
+            .status-item.flex-1 {
+                max-width: 48% !important;
+            }
+            .status-label {
+                font-size: 10px !important;
+            }
+            .status-value {
+                font-size: 12px !important;
+            }
+        }
+
+        /* Responsive header */
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column !important;
+                align-items: flex-start !important;
+                gap: 8px !important;
+            }
+            .header h1 {
+                font-size: 1.5rem !important;
+            }
+            .header-actions {
+                width: 100% !important;
+                justify-content: flex-start !important;
+            }
+        }
+    </style>
     <script>
         (function() {
             const theme = localStorage.getItem('inkypi-theme') || 
@@ -133,6 +260,13 @@
 
             // Initialize loop toggle button style
             updateLoopToggleStyle();
+
+            // Register service worker for PWA
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/static/sw.js')
+                    .then(reg => console.log('Service Worker registered'))
+                    .catch(err => console.log('Service Worker registration failed:', err));
+            }
         });
 
         async function toggleLoop() {
@@ -214,9 +348,12 @@
     <div class="frame">
         <!-- Header -->
         <header class="header">
-            <h1>{{ config.name }}</h1>
+            <h1>InkyPi v{{ version }}</h1>
 
             <div class="header-actions">
+                <a href="{{ url_for('main.display_page') }}" class="settings-button" title="Fullscreen Display" target="_blank">
+                    <span style="font-size: 20px;">🖼️</span>
+                </a>
                 <button class="settings-button dark-mode-toggle" title="Toggle Dark Mode" aria-label="Toggle Dark Mode"></button>
                 <a href="{{ url_for('apikeys.apikeys_page') }}" class="settings-button" title="API Keys">
                     <span style="font-size: 20px;">🔑</span>
@@ -232,12 +369,12 @@
 
         <!-- Status Dashboard Card -->
         <div class="status-dashboard-card" style="padding: 12px 16px; display: block;">
-            <div style="display: flex; align-items: center; width: 100%;">
-                <!-- Left Section: Loop, Current, Next (65% width) -->
-                <div style="width: 65%; display: flex; align-items: center; gap: 16px; min-width: 0; flex-shrink: 0;">
+            <div class="status-row">
+                <!-- Left Section: Loop, Current, Next -->
+                <div class="status-left">
                     <!-- Loop Toggle -->
-                    <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
-                        <span style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Loop</span>
+                    <div class="status-item no-shrink">
+                        <span class="status-label">Loop</span>
                         <button id="loopToggle"
                                 class="mode-toggle-btn"
                                 data-enabled="{{ loop_enabled | default(true) | tojson }}"
@@ -248,20 +385,20 @@
                         </button>
                     </div>
                     <!-- Current Plugin -->
-                    <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
-                        <span style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">Current</span>
-                        <span id="currentPlugin" style="font-size: 14px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
+                    <div class="status-item flex-1">
+                        <span class="status-label">Current</span>
+                        <span id="currentPlugin" class="status-value">...</span>
                     </div>
                     <!-- Next Plugin -->
-                    <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
-                        <span style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">Next</span>
-                        <span id="nextPlugin" style="font-size: 14px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
+                    <div class="status-item flex-1">
+                        <span class="status-label">Next</span>
+                        <span id="nextPlugin" class="status-value">...</span>
                     </div>
                 </div>
-                <!-- Right Section: Status/Countdown (35% width) -->
-                <div class="countdown-display" style="width: 35%; position: relative; display: flex; flex-direction: row; align-items: center; padding-left: 16px; padding-right: 40px; flex-shrink: 0;">
-                    <span class="countdown-label" style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; margin-right: 8px; margin-bottom: 0;">Changes in</span>
-                    <span id="countdown" style="font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap;">--:--</span>
+                <!-- Right Section: Status/Countdown -->
+                <div class="status-right">
+                    <span class="status-label countdown-label" style="margin-right: 8px;">Changes in</span>
+                    <span id="countdown" class="status-value" style="white-space: nowrap;">--:--</span>
                     <button id="skipButton" onclick="skipToNext()" title="Skip to next plugin"
                             style="position: absolute; right: 0; top: 50%; transform: translateY(-50%); background: var(--accent-primary); color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap;">
                         ▶

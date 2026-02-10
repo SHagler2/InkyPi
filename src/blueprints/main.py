@@ -5,6 +5,15 @@ from datetime import datetime
 
 main_bp = Blueprint("main", __name__)
 
+def get_version():
+    """Read version from VERSION file."""
+    version_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'VERSION')
+    try:
+        with open(version_file, 'r') as f:
+            return f.read().strip()
+    except:
+        return "2.0.0"
+
 @main_bp.route('/')
 def main_page():
     device_config = current_app.config['DEVICE_CONFIG']
@@ -12,7 +21,13 @@ def main_page():
     return render_template('inky.html',
                          config=device_config.get_config(),
                          plugins=device_config.get_plugins(),
-                         loop_enabled=loop_enabled)
+                         loop_enabled=loop_enabled,
+                         version=get_version())
+
+@main_bp.route('/display')
+def display_page():
+    """Fullscreen display view - shows just the current image with auto-refresh."""
+    return render_template('display.html')
 
 @main_bp.route('/api/current_image')
 def get_current_image():
