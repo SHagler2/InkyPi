@@ -45,53 +45,68 @@ class Wpotd(BasePlugin):
     def generate_image(self, settings: Dict[str, Any], device_config: Dict[str, Any]) -> Image.Image:
         logger.info("=== Wikipedia POTD Plugin: Starting image generation ===")
 
-        datetofetch = self._determine_date(settings)
-        logger.info(f"Fetching Wikipedia Picture of the Day for: {datetofetch}")
-        logger.debug(f"Settings: shrink_to_fit={settings.get('shrinkToFitWpotd', 'false')}, randomize={settings.get('randomizeWpotd', 'false')}")
-
-        data = self._fetch_potd(datetofetch)
-        picurl = data["image_src"]
-        title = data.get("title", "")
-        logger.info(f"Image URL: {picurl}")
-        logger.debug(f"Image filename: {data.get('filename', 'Unknown')}")
-        logger.debug(f"Image title: {title}")
-
-        # Get dimensions
+        # Get dimensions early for retry logic
         max_width, max_height = device_config.get_resolution()
         if device_config.get_config("orientation") == "vertical":
             max_width, max_height = max_height, max_width
             logger.debug(f"Vertical orientation detected, dimensions: {max_width}x{max_height}")
-
         dimensions = (max_width, max_height)
 
-        # Use adaptive loader if shrink-to-fit is enabled
         shrink_to_fit = settings.get("shrinkToFitWpotd") == "true"
         fit_mode = settings.get("fitMode", "fit")  # Default to 'fit' for letterbox
-        logger.info(
-            f"Wikipedia POTD display settings: shrink_to_fit={'enabled' if shrink_to_fit else 'disabled'}, "
-            f"fit_mode={fit_mode}, "
-            f"{'using adaptive loader with fit_mode' if shrink_to_fit else 'downloading original size'}"
-        )
+        is_random_mode = settings.get("randomizeWpotd") == "true"
 
-        image = self._download_image(
-            picurl,
-            dimensions=dimensions,
-            resize=shrink_to_fit,
-            fit_mode=fit_mode,
-        )
-        if image is None:
-            logger.error("Failed to download WPOTD image")
-            raise RuntimeError("Failed to download WPOTD image.")
-        if shrink_to_fit:
-            logger.info(f"Image resized to fit device dimensions: {max_width}x{max_height}")
+        # Retry logic for random mode - try up to 5 different dates if one fails
+        max_attempts = 5 if is_random_mode else 1
+        last_error = None
 
-        # Add title overlay
-        if title:
-            image = self._add_title_overlay(image, title)
-            logger.info(f"Added title overlay: {title}")
+        for attempt in range(max_attempts):
+            try:
+                datetofetch = self._determine_date(settings)
+                logger.info(f"Fetching Wikipedia Picture of the Day for: {datetofetch}" +
+                           (f" (attempt {attempt + 1}/{max_attempts})" if max_attempts > 1 else ""))
 
-        logger.info("=== Wikipedia POTD Plugin: Image generation complete ===")
-        return image
+                data = self._fetch_potd(datetofetch)
+                picurl = data["image_src"]
+                title = data.get("title", "")
+                logger.info(f"Image URL: {picurl}")
+
+                logger.info(
+                    f"Wikipedia POTD display settings: shrink_to_fit={'enabled' if shrink_to_fit else 'disabled'}, "
+                    f"fit_mode={fit_mode}, "
+                    f"{'using adaptive loader with fit_mode' if shrink_to_fit else 'downloading original size'}"
+                )
+
+                image = self._download_image(
+                    picurl,
+                    dimensions=dimensions,
+                    resize=shrink_to_fit,
+                    fit_mode=fit_mode,
+                )
+                if image is None:
+                    raise RuntimeError("Image download returned None (possibly too large)")
+
+                if shrink_to_fit:
+                    logger.info(f"Image resized to fit device dimensions: {max_width}x{max_height}")
+
+                # Add title overlay
+                if title:
+                    image = self._add_title_overlay(image, title)
+                    logger.info(f"Added title overlay: {title}")
+
+                logger.info("=== Wikipedia POTD Plugin: Image generation complete ===")
+                return image
+
+            except Exception as e:
+                last_error = e
+                if is_random_mode and attempt < max_attempts - 1:
+                    logger.warning(f"Failed to load WPOTD for {datetofetch}: {e}. Trying another random date...")
+                    continue
+                else:
+                    break
+
+        logger.error(f"Failed to download WPOTD image after {max_attempts} attempt(s)")
+        raise RuntimeError(f"Failed to download WPOTD image: {last_error}")
 
     def _determine_date(self, settings: Dict[str, Any]) -> date:
         if settings.get("randomizeWpotd") == "true":

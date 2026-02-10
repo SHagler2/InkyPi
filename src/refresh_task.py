@@ -183,6 +183,9 @@ class RefreshTask:
                         if image_hash != latest_refresh.image_hash:
                             logger.info(f"Updating display. | refresh_info: {refresh_info}")
                             self.display_manager.display_image(image, image_settings=plugin.config.get("image_settings", []))
+                            # Simple log for easy scanning of display history
+                            plugin_name = plugin_config.get("display_name", refresh_action.get_plugin_id())
+                            logger.info(f"DISPLAYED: {plugin_name}")
                         else:
                             logger.info(f"Image already displayed, skipping refresh. | refresh_info: {refresh_info}")
 
