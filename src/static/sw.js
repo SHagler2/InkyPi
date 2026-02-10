@@ -1,5 +1,5 @@
 // InkyPi Service Worker
-const CACHE_NAME = 'inkypi-v4';
+const CACHE_NAME = 'inkypi-v5';
 const STATIC_ASSETS = [
   '/',
   '/static/styles/main.css',
