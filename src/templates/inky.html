@@ -343,6 +343,16 @@
     <script src="{{ url_for('static', filename='scripts/image_modal.js') }}"></script>
 </head>
 <body>
+    <!-- Global Refresh Status Bar -->
+    <div id="mainStatus" style="position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+        background: #1a1a2e; color: #e0e0e0; padding: 10px 16px; font-family: monospace;
+        font-size: 14px; display: none; align-items: center; gap: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+        <span id="mainStatusIcon" style="font-size: 18px;">&#9881;</span>
+        <span id="mainStatusText">Ready</span>
+    </div>
+    <div id="mainStatusSpacer" style="height: 0;"></div>
+
     <script src="{{ url_for('static', filename='scripts/dark_mode.js') }}"></script>
     <!-- Main container -->
     <div class="frame">
@@ -351,6 +361,10 @@
             <h1>InkyPi v{{ version }}</h1>
 
             <div class="header-actions">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--text-secondary); white-space: nowrap;">
+                    <input type="checkbox" id="showMainStatus" style="width: 16px; height: 16px; cursor: pointer;" />
+                    Live Status
+                </label>
                 <a href="{{ url_for('main.display_page') }}" class="settings-button" title="Fullscreen Display" target="_blank">
                     <span style="font-size: 20px;">🖼️</span>
                 </a>
@@ -585,5 +599,135 @@
             });
         </script>
     </div>
+
+    <!-- Global Refresh Status Polling -->
+    <script>
+    window.mainStatus = (function() {
+        const STORAGE_KEY = 'inkypi-show-main-status';
+        const toggle = document.getElementById('showMainStatus');
+        const bar = document.getElementById('mainStatus');
+        const spacer = document.getElementById('mainStatusSpacer');
+        const icon = document.getElementById('mainStatusIcon');
+        const text = document.getElementById('mainStatusText');
+
+        let hideTimeout = null;
+        let refreshInProgress = false;
+        let refreshStartTimestamp = 0;
+        let pollTimer = null;
+
+        // Restore toggle state from localStorage
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            toggle.checked = saved === 'true';
+        } catch (e) { toggle.checked = false; }
+
+        toggle.addEventListener('change', function() {
+            try { localStorage.setItem(STORAGE_KEY, toggle.checked); } catch (e) {}
+            if (toggle.checked) { startPolling(); }
+            else { stopPolling(); hideBar(); }
+        });
+
+        function showBar() {
+            bar.style.display = 'flex';
+            spacer.style.height = '44px';
+        }
+
+        function hideBar() {
+            bar.style.display = 'none';
+            spacer.style.height = '0';
+        }
+
+        function setBarStyle(stage) {
+            if (stage === 'displayed' || stage === 'rendering') {
+                bar.style.background = '#1b4332';
+            } else if (stage === 'error' || stage === 'unidentified') {
+                bar.style.background = '#4a1a1a';
+            } else {
+                bar.style.background = '#1a1a2e';
+            }
+        }
+
+        const stageIcons = {
+            refreshing:  '&#9881;',    generating:  '&#9881;',
+            processing:  '&#9881;',    displaying:  '&#128228;',
+            displayed:   '&#9989;',    idle:        '&#128164;',
+            error:       '&#9888;',    starting:    '&#9881;',
+            recording:   '&#127908;',  detecting:   '&#129504;',
+            detected:    '&#127925;',  identifying: '&#128269;',
+            rendering:   '&#127912;',  unidentified:'&#10067;',
+        };
+
+        const activeStages = new Set([
+            'refreshing', 'generating', 'processing', 'displaying',
+            'starting', 'recording', 'detecting', 'detected', 'identifying', 'rendering'
+        ]);
+        const terminalStages = new Set(['displayed', 'idle', 'error', 'unidentified']);
+
+        function updateBar(stageIcon, message, stage) {
+            icon.innerHTML = stageIcon;
+            text.textContent = message || stage;
+            setBarStyle(stage);
+        }
+
+        async function pollStatus() {
+            try {
+                const r = await fetch('/static/images/plugins/refresh_status.json?t=' + Date.now());
+                if (!r.ok) return;
+                const data = await r.json();
+                if (!data || typeof data.stage !== 'string') return;
+
+                const isActive = activeStages.has(data.stage);
+                const isTerminal = terminalStages.has(data.stage);
+
+                if (isActive) {
+                    if (!refreshInProgress) {
+                        refreshInProgress = true;
+                        refreshStartTimestamp = data.timestamp;
+                    }
+                    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
+
+                    if (data.plugin_id && data.has_plugin_status) {
+                        try {
+                            const pr = await fetch('/images/' + encodeURIComponent(data.plugin_id) + '/status.json?t=' + Date.now());
+                            if (pr.ok) {
+                                const ps = await pr.json();
+                                if (ps && typeof ps.timestamp === 'number' && ps.timestamp >= refreshStartTimestamp - 2) {
+                                    updateBar(stageIcons[ps.stage] || stageIcons.generating, ps.detail, ps.stage);
+                                    showBar();
+                                    return;
+                                }
+                            }
+                        } catch (e) {}
+                    }
+
+                    updateBar(stageIcons[data.stage] || stageIcons.generating, data.detail, data.stage);
+                    showBar();
+                    return;
+                }
+
+                if (refreshInProgress && isTerminal) {
+                    refreshInProgress = false;
+                    updateBar(stageIcons[data.stage] || stageIcons.idle, data.detail, data.stage);
+                    showBar();
+                    if (hideTimeout) clearTimeout(hideTimeout);
+                    hideTimeout = setTimeout(hideBar, 4000);
+                }
+            } catch (e) {}
+        }
+
+        function startPolling() {
+            if (pollTimer) return;
+            pollTimer = setInterval(pollStatus, 800);
+        }
+
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+
+        if (toggle.checked) startPolling();
+
+        return {};
+    })();
+    </script>
 </body>
 </html>
