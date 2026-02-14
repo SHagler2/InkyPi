@@ -215,52 +215,50 @@
         // Poll every 500ms (only active during updates)
         setInterval(pollStatus, 500);
 
-        // Override Update Now to use non-blocking fire-and-forget
-        window.handleAction = function(action) {
-            if (action === 'add_to_loop' || action === 'save_to_loop') {
-                // Use original for loop actions - call it inline
-                const form = document.getElementById('settingsForm');
-                const formData = new FormData(form);
+        // Override handleAction for non-blocking "Update Now" while preserving loop actions
+        const _originalHandleAction = window.handleAction;
+        window.handleAction = async function(action) {
+            // Let the framework handle add_to_loop
+            if (action === 'add_to_loop') {
+                return _originalHandleAction(action);
+            }
+
+            // Handle save_to_loop directly (more reliable than delegation)
+            if (action === 'save_to_loop') {
                 const loadingIndicator = document.getElementById('loadingIndicator');
                 loadingIndicator.style.display = 'block';
 
-                if (action === 'save_to_loop') {
-                    const settings = {};
-                    formData.forEach((v, k) => { if (k !== 'plugin_id') settings[k] = v; });
-                    fetch('/loops/update_plugin_settings', {
+                const form = document.getElementById('settingsForm');
+                const formData = new FormData(form);
+                const settings = {};
+                formData.forEach((value, key) => {
+                    if (key !== 'plugin_id') {
+                        settings[key] = value;
+                    }
+                });
+
+                try {
+                    const response = await fetch('/update_plugin_settings', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ loop_name: loopName, plugin_id: formData.get('plugin_id'), plugin_settings: settings })
-                    }).then(r => r.json()).then(result => {
-                        loadingIndicator.style.display = 'none';
-                        showResponseModal('success', 'Settings saved');
-                    }).catch(() => {
-                        loadingIndicator.style.display = 'none';
-                        showResponseModal('failure', 'Error saving settings');
+                        body: JSON.stringify({
+                            loop_name: loopName,
+                            plugin_id: formData.get('plugin_id'),
+                            plugin_settings: settings
+                        })
                     });
-                    return;
+                    const result = await response.json();
+                    if (response.ok) {
+                        showResponseModal('success', 'Settings saved to loop "' + loopName + '"');
+                    } else {
+                        showResponseModal('failure', result.error || 'Error saving settings');
+                    }
+                } catch (error) {
+                    console.error('Error saving to loop:', error);
+                    showResponseModal('failure', 'An error occurred while saving settings.');
+                } finally {
+                    loadingIndicator.style.display = 'none';
                 }
-
-                // add_to_loop
-                const scheduleForm = document.getElementById('scheduleForm');
-                const loopFormData = new FormData(scheduleForm);
-                const interval = parseInt(loopFormData.get("refresh_interval"));
-                const unit = loopFormData.get("interval_unit");
-                let intervalSeconds = interval;
-                if (unit === "minutes") intervalSeconds = interval * 60;
-                else if (unit === "hours") intervalSeconds = interval * 3600;
-                else if (unit === "days") intervalSeconds = interval * 86400;
-                formData.append("loop_name", loopFormData.get("loop_name"));
-                formData.append("refresh_interval_seconds", intervalSeconds);
-                fetch('/loops/add_plugin_to_loop', { method: 'POST', body: formData })
-                    .then(r => r.json()).then(result => {
-                        loadingIndicator.style.display = 'none';
-                        closeModal('scheduleModal');
-                        showResponseModal('success', result.message || 'Added to loop');
-                    }).catch(() => {
-                        loadingIndicator.style.display = 'none';
-                        showResponseModal('failure', 'Error adding to loop');
-                    });
                 return;
             }
 
