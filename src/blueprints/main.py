@@ -179,8 +179,17 @@ def get_next_change_time():
             if next_plugin_config:
                 next_plugin_name = next_plugin_config.get("display_name", next_ref.plugin_id)
 
-    if last_refresh:
-        # Calculate seconds since last refresh
+    # Use last loop rotation time (not last refresh time) for countdown
+    # so that auto-refreshing plugins don't reset the countdown
+    refresh_task = current_app.config.get('REFRESH_TASK')
+    last_rotation = getattr(refresh_task, 'last_loop_rotation_time', None) if refresh_task else None
+
+    if last_rotation:
+        now = datetime.now(last_rotation.tzinfo)
+        elapsed = (now - last_rotation).total_seconds()
+        remaining = max(0, interval_seconds - elapsed)
+    elif last_refresh:
+        # Fallback to last refresh time if no rotation tracked yet
         now = datetime.now(last_refresh.tzinfo)
         elapsed = (now - last_refresh).total_seconds()
         remaining = max(0, interval_seconds - elapsed)

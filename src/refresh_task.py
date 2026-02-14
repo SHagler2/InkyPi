@@ -51,6 +51,17 @@ class RefreshTask:
         else:
             self.last_display_time = None
 
+        # Track when the last LOOP rotation happened (distinct from auto-refresh).
+        # This prevents auto-refreshing plugins from blocking loop rotation.
+        last_rotation_str = saved_auto_refresh.get("last_loop_rotation_time")
+        if last_rotation_str:
+            try:
+                self.last_loop_rotation_time = datetime.fromisoformat(last_rotation_str)
+            except (ValueError, TypeError):
+                self.last_loop_rotation_time = None
+        else:
+            self.last_loop_rotation_time = None
+
         # If no auto-refresh tracking but current plugin is stocks, restore from saved settings
         if not self.auto_refresh_plugin_settings:
             refresh_info = device_config.get_refresh_info()
@@ -166,26 +177,23 @@ class RefreshTask:
                         if self.device_config.get_config("log_system_stats"):
                             self.log_system_stats()
 
-                        # Check if we should auto-refresh the current plugin
-                        if use_auto_refresh and self._should_auto_refresh(current_dt):
-                            logger.info(f"Auto-refreshing current plugin: {latest_refresh.plugin_id}")
-                            refresh_action = AutoRefresh(latest_refresh.plugin_id, self.auto_refresh_plugin_settings)
-                            pname = self._get_display_name(latest_refresh.plugin_id)
-                            self._set_global_status("refreshing", f"Auto-refreshing {pname}...", pname, latest_refresh.plugin_id)
-                        else:
-                            # Check if loop rotation is enabled
-                            loop_enabled = self.device_config.get_config("loop_enabled", default=True)
-                            if not loop_enabled:
-                                # Loop is disabled - but if auto-refresh is configured, we should
-                                # still wait for the next auto-refresh interval, not skip entirely
-                                if use_auto_refresh:
-                                    elapsed = (current_dt - self.last_display_time).total_seconds() if self.last_display_time else 0
-                                    logger.info(f"Loop disabled, auto-refresh waiting (elapsed: {elapsed:.0f}s / {self._get_auto_refresh_seconds()}s)")
-                                else:
-                                    logger.info("Loop rotation is disabled, no action needed")
-                                continue
+                        # Check if loop rotation is enabled
+                        loop_enabled = self.device_config.get_config("loop_enabled", default=True)
 
-                            # handle refresh using loop mode
+                        # Check if loop rotation is overdue (takes priority over auto-refresh)
+                        loop_rotation_due = False
+                        if loop_enabled:
+                            loop_manager = self.device_config.get_loop_manager()
+                            rotation_interval = loop_manager.rotation_interval_seconds
+                            if self.last_loop_rotation_time:
+                                elapsed_since_rotation = (current_dt - self.last_loop_rotation_time).total_seconds()
+                                loop_rotation_due = elapsed_since_rotation >= rotation_interval
+                            else:
+                                # No rotation tracked yet - first run, do rotation
+                                loop_rotation_due = True
+
+                        if loop_rotation_due:
+                            # Loop rotation takes priority over auto-refresh
                             logger.info(f"Running interval refresh check. | current_time: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}")
 
                             loop_manager = self.device_config.get_loop_manager()
@@ -194,6 +202,21 @@ class RefreshTask:
                                 refresh_action = LoopRefresh(loop, plugin_ref)
                                 pname = self._get_display_name(plugin_ref.plugin_id)
                                 self._set_global_status("refreshing", f"Loading {pname}...", pname, plugin_ref.plugin_id)
+                        elif use_auto_refresh and self._should_auto_refresh(current_dt):
+                            # Auto-refresh current plugin (only if loop rotation isn't due)
+                            logger.info(f"Auto-refreshing current plugin: {latest_refresh.plugin_id}")
+                            refresh_action = AutoRefresh(latest_refresh.plugin_id, self.auto_refresh_plugin_settings)
+                            pname = self._get_display_name(latest_refresh.plugin_id)
+                            self._set_global_status("refreshing", f"Auto-refreshing {pname}...", pname, latest_refresh.plugin_id)
+                        elif not loop_enabled:
+                            # Loop is disabled - but if auto-refresh is configured, we should
+                            # still wait for the next auto-refresh interval, not skip entirely
+                            if use_auto_refresh:
+                                elapsed = (current_dt - self.last_display_time).total_seconds() if self.last_display_time else 0
+                                logger.info(f"Loop disabled, auto-refresh waiting (elapsed: {elapsed:.0f}s / {self._get_auto_refresh_seconds()}s)")
+                            else:
+                                logger.info("Loop rotation is disabled, no action needed")
+                            continue
 
                     if refresh_action:
                         plugin_config = self.device_config.get_plugin(refresh_action.get_plugin_id())
@@ -227,6 +250,12 @@ class RefreshTask:
 
                         # update latest refresh data in the device config (in-memory only)
                         self.device_config.refresh_info = RefreshInfo(**refresh_info)
+
+                        # Track loop rotation time (distinct from auto-refresh time)
+                        # This ensures the countdown timer reflects actual loop rotations,
+                        # not auto-refresh cycles that shouldn't reset it.
+                        if isinstance(refresh_action, LoopRefresh):
+                            self.last_loop_rotation_time = current_dt
 
                         # Track plugin settings for auto-refresh
                         plugin_settings = getattr(refresh_action, 'plugin_settings', None)
@@ -392,10 +421,12 @@ class RefreshTask:
         self.auto_refresh_plugin_settings = plugin_settings or {}
         self.last_display_time = current_dt
         # Persist to config so it survives service restarts
-        self.device_config.update_value("auto_refresh_tracking", {
+        tracking = {
             "plugin_settings": self.auto_refresh_plugin_settings,
-            "last_display_time": current_dt.isoformat() if current_dt else None
-        }, write=False)  # Don't write immediately, will be batched
+            "last_display_time": current_dt.isoformat() if current_dt else None,
+            "last_loop_rotation_time": self.last_loop_rotation_time.isoformat() if self.last_loop_rotation_time else None,
+        }
+        self.device_config.update_value("auto_refresh_tracking", tracking, write=False)  # Don't write immediately, will be batched
 
     def _determine_next_plugin_loop_mode(self, loop_manager, current_dt):
         """Determines the next plugin to refresh in loop mode based on the active loop and rotation."""

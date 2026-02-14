@@ -20,3 +20,4 @@ sounddevice
 scipy
 shazamio
 ai-edge-litert
+skyfield>=1.45
