@@ -79,6 +79,31 @@ def image(plugin_id, filename):
     # Serve the file from the plugin directory
     return send_from_directory(abs_plugin_dir, filename)
 
+@plugin_bp.route('/update_now_async', methods=['POST'])
+def update_now_async():
+    """Non-blocking update endpoint. Queues the update and returns immediately.
+    Use status polling (e.g. status.json) to track progress."""
+    device_config = current_app.config['DEVICE_CONFIG']
+    refresh_task = current_app.config['REFRESH_TASK']
+
+    try:
+        plugin_settings = parse_form(request.form)
+        plugin_settings.update(handle_request_files(request.files))
+        plugin_id = plugin_settings.pop("plugin_id")
+
+        if refresh_task.running:
+            queued = refresh_task.queue_manual_update(ManualRefresh(plugin_id, plugin_settings))
+            if queued:
+                return jsonify({"success": True, "message": "Update queued"}), 202
+            else:
+                return jsonify({"error": "Refresh task not running"}), 500
+        else:
+            return jsonify({"error": "Refresh task not running"}), 500
+
+    except Exception as e:
+        logger.exception(f"Error in update_now_async: {str(e)}")
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
 @plugin_bp.route('/update_now', methods=['POST'])
 def update_now():
     device_config = current_app.config['DEVICE_CONFIG']

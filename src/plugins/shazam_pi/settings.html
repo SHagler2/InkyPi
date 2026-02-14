@@ -1,0 +1,299 @@
+<!-- ShazamPi Live Status - only visible during updates when enabled -->
+<div id="shazamStatus" style="
+    position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+    background: #1a1a2e; color: #e0e0e0;
+    padding: 10px 16px; font-family: monospace;
+    font-size: 14px; display: none; align-items: center; gap: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+">
+    <span id="statusIcon" style="font-size: 18px;">&#9835;</span>
+    <span id="statusText">Ready</span>
+</div>
+<!-- Spacer for when status bar is visible -->
+<div id="shazamStatusSpacer" style="height: 0;"></div>
+
+<div class="form-group">
+    <label for="autoRefresh" class="form-label">Auto-Listen Interval (minutes)</label>
+    <select id="autoRefresh" name="autoRefresh" class="form-input">
+        <option value="">Off - Manual only</option>
+        <option value="1">Every 1 minute</option>
+        <option value="2">Every 2 minutes</option>
+        <option value="3">Every 3 minutes</option>
+        <option value="5">Every 5 minutes</option>
+        <option value="10">Every 10 minutes</option>
+    </select>
+    <small style="display: block; margin-top: 5px; color: #666;">
+        How often to automatically listen for music. Click "Update Now" once to start, then it repeats at this interval.
+    </small>
+</div>
+
+<div class="form-group">
+    <label for="recordingDuration" class="form-label">Recording Duration (seconds)</label>
+    <input type="number" id="recordingDuration" name="recordingDuration" class="form-input"
+           min="5" max="30" step="1" />
+    <small style="display: block; margin-top: 5px; color: #666;">
+        How long to listen for music each cycle (5-30 seconds)
+    </small>
+</div>
+
+<div class="form-group">
+    <label for="musicConfidence" class="form-label">Music Detection Confidence</label>
+    <input type="number" id="musicConfidence" name="musicConfidence" class="form-input"
+           min="0.1" max="0.9" step="0.05" />
+    <small style="display: block; margin-top: 5px; color: #666;">
+        YAMNet confidence threshold (lower = more sensitive, default 0.2)
+    </small>
+</div>
+
+<div class="form-group">
+    <label for="fitMode" class="form-label">Display Mode</label>
+    <select id="fitMode" name="fitMode" class="form-input">
+        <option value="fit">Fit (Letterbox - Full image visible)</option>
+        <option value="fill">Fill (Crop - No black bars)</option>
+    </select>
+    <small style="display: block; margin-top: 5px; color: #666;">
+        Fit: Shows entire album art with black bars if needed<br>
+        Fill: Crops edges to fill screen completely
+    </small>
+</div>
+
+<div class="form-group">
+    <label for="weatherApiKey" class="form-label">OpenWeatherMap API Key (optional)</label>
+    <input type="text" id="weatherApiKey" name="weatherApiKey" class="form-input"
+           placeholder="Auto-detected from Weather plugin if blank" />
+    <small style="display: block; margin-top: 5px; color: #666;">
+        Leave blank to use the Weather plugin's API key and location
+    </small>
+</div>
+
+<div class="form-group">
+    <label for="geoCoordinates" class="form-label">Geo Coordinates (lat, lon)</label>
+    <input type="text" id="geoCoordinates" name="geoCoordinates" class="form-input"
+           placeholder="Auto-detected from Weather plugin if blank" />
+</div>
+
+<div class="form-group">
+    <label for="units" class="form-label">Temperature Units</label>
+    <select id="units" name="units" class="form-input">
+        <option value="imperial">Imperial (&deg;F)</option>
+        <option value="metric">Metric (&deg;C)</option>
+    </select>
+</div>
+
+<div class="form-group">
+    <label class="form-label" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+        <input type="checkbox" id="showStatus" name="showStatus" style="width: 18px; height: 18px; cursor: pointer;" />
+        Show Live Status During Updates
+    </label>
+    <small style="display: block; margin-top: 5px; color: #666;">
+        Show a status bar at the top of the page with real-time progress when updating
+    </small>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const $autoRefresh = document.getElementById('autoRefresh');
+        const $recordingDuration = document.getElementById('recordingDuration');
+        const $musicConfidence = document.getElementById('musicConfidence');
+        const $fitMode = document.getElementById('fitMode');
+        const $weatherApiKey = document.getElementById('weatherApiKey');
+        const $geoCoordinates = document.getElementById('geoCoordinates');
+        const $units = document.getElementById('units');
+        const $showStatus = document.getElementById('showStatus');
+
+        if (loadPluginSettings) {
+            $autoRefresh.value = pluginSettings.autoRefresh || '';
+            $recordingDuration.value = pluginSettings.recordingDuration || 5;
+            $musicConfidence.value = pluginSettings.musicConfidence || 0.2;
+            $fitMode.value = pluginSettings.fitMode || 'fit';
+            $weatherApiKey.value = pluginSettings.weatherApiKey || '';
+            $geoCoordinates.value = pluginSettings.geoCoordinates || '';
+            $units.value = pluginSettings.units || 'imperial';
+            $showStatus.checked = pluginSettings.showStatus === 'on' || pluginSettings.showStatus === true;
+        } else {
+            $autoRefresh.value = '1';
+            $recordingDuration.value = 5;
+            $musicConfidence.value = 0.2;
+            $fitMode.value = 'fit';
+            $weatherApiKey.value = '';
+            $geoCoordinates.value = '';
+            $units.value = 'imperial';
+            $showStatus.checked = true;
+        }
+
+        // Status polling
+        const stageLabels = {
+            starting:     ['&#9881;',  'Initializing...'],
+            recording:    ['&#127908;', ''],  // detail has the message
+            detecting:    ['&#129504;', ''],
+            detected:     ['&#127925;', ''],
+            identifying:  ['&#128269;', ''],
+            rendering:    ['&#127912;', ''],
+            unidentified: ['&#10067;',  ''],
+            idle:         ['&#128164;', ''],
+        };
+
+        let updateInProgress = false;
+        let lastStatusTimestamp = 0;
+        let updateStartedAt = 0;  // JS timestamp when Update was clicked
+
+        function showStatusBar() {
+            if (!document.getElementById('showStatus').checked) return;
+            const bar = document.getElementById('shazamStatus');
+            const spacer = document.getElementById('shazamStatusSpacer');
+            bar.style.display = 'flex';
+            spacer.style.height = '44px';
+        }
+
+        function hideStatusBar() {
+            const bar = document.getElementById('shazamStatus');
+            const spacer = document.getElementById('shazamStatusSpacer');
+            bar.style.display = 'none';
+            spacer.style.height = '0';
+        }
+
+        function updateStatusBar(data) {
+            const info = stageLabels[data.stage] || ['&#9835;', data.stage];
+            document.getElementById('statusIcon').innerHTML = info[0];
+            document.getElementById('statusText').textContent = data.detail || info[1];
+
+            const bar = document.getElementById('shazamStatus');
+            if (data.stage === 'rendering') {
+                bar.style.background = '#1b4332';
+            } else if (data.stage === 'unidentified') {
+                bar.style.background = '#4a1a1a';
+            } else {
+                bar.style.background = '#1a1a2e';
+            }
+        }
+
+        function pollStatus() {
+            if (!updateInProgress) return;  // Only poll during active updates
+
+            fetch('/images/shazam_pi/status.json?t=' + Date.now())
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (!data || !updateInProgress) return;
+
+                    // Ignore stale status from a previous run
+                    // (status.json timestamp is seconds, updateStartedAt is ms)
+                    if (data.timestamp * 1000 < updateStartedAt) return;
+
+                    updateStatusBar(data);
+
+                    // Detect completion
+                    if (data.timestamp !== lastStatusTimestamp) {
+                        lastStatusTimestamp = data.timestamp;
+                        const terminal = ['rendering', 'unidentified', 'idle'];
+                        if (terminal.includes(data.stage)) {
+                            updateInProgress = false;
+                            document.getElementById('loadingIndicator').style.display = 'none';
+                            // Build a descriptive message based on the final stage
+                            let msg = data.detail || 'Sending to display...';
+                            if (data.stage === 'rendering') {
+                                msg = (data.detail || 'Song found') + ' — display updating shortly';
+                            } else if (data.stage === 'idle') {
+                                msg = 'No music detected';
+                            } else if (data.stage === 'unidentified') {
+                                msg = data.detail || 'Music heard but could not identify';
+                            }
+                            // Brief delay so user sees final status, then hide bar and show modal
+                            setTimeout(() => {
+                                hideStatusBar();
+                                showResponseModal('success', msg);
+                            }, 1500);
+                        }
+                    }
+                })
+                .catch(() => {
+                    if (updateInProgress) {
+                        document.getElementById('statusText').textContent = 'Processing...';
+                    }
+                });
+        }
+
+        // Poll every 500ms (only active during updates)
+        setInterval(pollStatus, 500);
+
+        // Override Update Now to use non-blocking fire-and-forget
+        window.handleAction = function(action) {
+            if (action === 'add_to_loop' || action === 'save_to_loop') {
+                // Use original for loop actions - call it inline
+                const form = document.getElementById('settingsForm');
+                const formData = new FormData(form);
+                const loadingIndicator = document.getElementById('loadingIndicator');
+                loadingIndicator.style.display = 'block';
+
+                if (action === 'save_to_loop') {
+                    const settings = {};
+                    formData.forEach((v, k) => { if (k !== 'plugin_id') settings[k] = v; });
+                    fetch('/loops/update_plugin_settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ loop_name: loopName, plugin_id: formData.get('plugin_id'), plugin_settings: settings })
+                    }).then(r => r.json()).then(result => {
+                        loadingIndicator.style.display = 'none';
+                        showResponseModal('success', 'Settings saved');
+                    }).catch(() => {
+                        loadingIndicator.style.display = 'none';
+                        showResponseModal('failure', 'Error saving settings');
+                    });
+                    return;
+                }
+
+                // add_to_loop
+                const scheduleForm = document.getElementById('scheduleForm');
+                const loopFormData = new FormData(scheduleForm);
+                const interval = parseInt(loopFormData.get("refresh_interval"));
+                const unit = loopFormData.get("interval_unit");
+                let intervalSeconds = interval;
+                if (unit === "minutes") intervalSeconds = interval * 60;
+                else if (unit === "hours") intervalSeconds = interval * 3600;
+                else if (unit === "days") intervalSeconds = interval * 86400;
+                formData.append("loop_name", loopFormData.get("loop_name"));
+                formData.append("refresh_interval_seconds", intervalSeconds);
+                fetch('/loops/add_plugin_to_loop', { method: 'POST', body: formData })
+                    .then(r => r.json()).then(result => {
+                        loadingIndicator.style.display = 'none';
+                        closeModal('scheduleModal');
+                        showResponseModal('success', result.message || 'Added to loop');
+                    }).catch(() => {
+                        loadingIndicator.style.display = 'none';
+                        showResponseModal('failure', 'Error adding to loop');
+                    });
+                return;
+            }
+
+            // "Update Now" - non-blocking approach
+            const form = document.getElementById('settingsForm');
+            const formData = new FormData(form);
+            const loadingIndicator = document.getElementById('loadingIndicator');
+
+            loadingIndicator.style.display = 'block';
+            updateInProgress = true;
+            lastStatusTimestamp = 0;
+            updateStartedAt = Date.now();
+            showStatusBar();
+            updateStatusBar({ stage: 'starting', detail: 'Starting update...' });
+
+            // Fire async update - returns immediately, track via status polling
+            fetch('/update_now_async', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(result => {
+                    if (!result.success) {
+                        updateInProgress = false;
+                        loadingIndicator.style.display = 'none';
+                        hideStatusBar();
+                        showResponseModal('failure', result.error || 'Update failed');
+                    }
+                    // Success means queued - polling will detect completion
+                })
+                .catch(err => {
+                    updateInProgress = false;
+                    loadingIndicator.style.display = 'none';
+                    hideStatusBar();
+                    showResponseModal('failure', 'Connection error');
+                });
+        };
+    });
+</script>

@@ -112,7 +112,7 @@ if __name__ == '__main__':
             except (OSError, socket.error):
                 pass  # Ignore if we can't get the IP
 
-        serve(app, host="0.0.0.0", port=PORT, threads=1)
+        serve(app, host="0.0.0.0", port=PORT, threads=2)
     finally:
         refresh_task.stop()
         # Clean up HTTP session connection pool
