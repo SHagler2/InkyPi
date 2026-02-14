@@ -1,7 +1,9 @@
 import threading
+import tempfile
 import time
 import os
 import gc
+import json
 import logging
 import psutil
 import pytz
@@ -12,6 +14,9 @@ from model import RefreshInfo, LoopManager
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+GLOBAL_STATUS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "images", "plugins")
+GLOBAL_STATUS_FILE = os.path.join(GLOBAL_STATUS_DIR, "refresh_status.json")
 
 class RefreshTask:
     """Handles the logic for refreshing the display using a background thread."""
@@ -61,6 +66,13 @@ class RefreshTask:
         """Starts the background thread for refreshing the display."""
         if not self.thread or not self.thread.is_alive():
             logger.info("Starting refresh task")
+            os.makedirs(GLOBAL_STATUS_DIR, exist_ok=True)
+            # Clean up any orphaned temp files from previous crashes
+            for f in os.listdir(GLOBAL_STATUS_DIR):
+                if f.endswith('.tmp'):
+                    try: os.remove(os.path.join(GLOBAL_STATUS_DIR, f))
+                    except OSError: pass
+            self._set_global_status("idle", "Starting up...")
             self.thread = threading.Thread(target=self._run, daemon=True)
             self.running = True
             self.thread.start()
@@ -120,6 +132,15 @@ class RefreshTask:
                             use_auto_refresh = True  # Still want auto-refresh, but loop interval is shorter
                             logger.info(f"Auto-refresh configured: {auto_refresh_seconds}s, but loop interval {sleep_time}s is shorter")
 
+                    # Update status with next change countdown
+                    if sleep_time >= 3600:
+                        remaining = f"{sleep_time / 3600:.1f}h"
+                    elif sleep_time >= 60:
+                        remaining = f"{int(sleep_time / 60)}m"
+                    else:
+                        remaining = f"{int(sleep_time)}s"
+                    self._set_global_status("idle", f"Next change in {remaining}")
+
                     # Wait for sleep_time or until notified
                     self.condition.wait(timeout=sleep_time)
                     self.refresh_result = {}
@@ -138,6 +159,8 @@ class RefreshTask:
                         logger.info("Manual update requested")
                         refresh_action = self.manual_update_request
                         self.manual_update_request = ()
+                        pname = self._get_display_name(refresh_action.get_plugin_id())
+                        self._set_global_status("refreshing", f"Updating {pname}...", pname, refresh_action.get_plugin_id())
                     else:
 
                         if self.device_config.get_config("log_system_stats"):
@@ -147,6 +170,8 @@ class RefreshTask:
                         if use_auto_refresh and self._should_auto_refresh(current_dt):
                             logger.info(f"Auto-refreshing current plugin: {latest_refresh.plugin_id}")
                             refresh_action = AutoRefresh(latest_refresh.plugin_id, self.auto_refresh_plugin_settings)
+                            pname = self._get_display_name(latest_refresh.plugin_id)
+                            self._set_global_status("refreshing", f"Auto-refreshing {pname}...", pname, latest_refresh.plugin_id)
                         else:
                             # Check if loop rotation is enabled
                             loop_enabled = self.device_config.get_config("loop_enabled", default=True)
@@ -167,27 +192,38 @@ class RefreshTask:
                             loop, plugin_ref = self._determine_next_plugin_loop_mode(loop_manager, current_dt)
                             if plugin_ref:
                                 refresh_action = LoopRefresh(loop, plugin_ref)
+                                pname = self._get_display_name(plugin_ref.plugin_id)
+                                self._set_global_status("refreshing", f"Loading {pname}...", pname, plugin_ref.plugin_id)
 
                     if refresh_action:
                         plugin_config = self.device_config.get_plugin(refresh_action.get_plugin_id())
                         if plugin_config is None:
                             logger.error(f"Plugin config not found for '{refresh_action.get_plugin_id()}'.")
+                            self._set_global_status("error", f"Plugin not found: {refresh_action.get_plugin_id()}")
                             continue
                         plugin = get_plugin_instance(plugin_config)
+                        plugin_name = plugin_config.get("display_name", refresh_action.get_plugin_id())
+                        plugin_id = refresh_action.get_plugin_id()
+
+                        self._set_global_status("generating", f"Generating {plugin_name}...", plugin_name, plugin_id)
                         image = refresh_action.execute(plugin, self.device_config, current_dt)
+
+                        self._set_global_status("processing", f"Processing {plugin_name}...", plugin_name, plugin_id)
                         image_hash = compute_image_hash(image)
 
                         refresh_info = refresh_action.get_refresh_info()
                         refresh_info.update({"refresh_time": current_dt.isoformat(), "image_hash": image_hash})
                         # check if image is the same as current image
                         if image_hash != latest_refresh.image_hash:
+                            self._set_global_status("displaying", f"Sending to display: {plugin_name}...", plugin_name, plugin_id)
                             logger.info(f"Updating display. | refresh_info: {refresh_info}")
                             self.display_manager.display_image(image, image_settings=plugin.config.get("image_settings", []))
                             # Simple log for easy scanning of display history
-                            plugin_name = plugin_config.get("display_name", refresh_action.get_plugin_id())
                             logger.info(f"DISPLAYED: {plugin_name}")
+                            self._set_global_status("displayed", f"Displayed: {plugin_name}", plugin_name, plugin_id)
                         else:
                             logger.info(f"Image already displayed, skipping refresh. | refresh_info: {refresh_info}")
+                            self._set_global_status("idle", f"No change: {plugin_name}", plugin_name, plugin_id)
 
                         # update latest refresh data in the device config (in-memory only)
                         self.device_config.refresh_info = RefreshInfo(**refresh_info)
@@ -195,7 +231,18 @@ class RefreshTask:
                         # Track plugin settings for auto-refresh
                         plugin_settings = getattr(refresh_action, 'plugin_settings', None)
                         if plugin_settings is None and hasattr(refresh_action, 'plugin_reference'):
-                            plugin_settings = refresh_action.plugin_reference.plugin_settings
+                            plugin_settings = dict(refresh_action.plugin_reference.plugin_settings or {})
+                            # If loop plugin has a refresh interval but no explicit autoRefresh,
+                            # use the loop's per-plugin refresh interval as auto-refresh.
+                            # This ensures plugins like ShazamPi that need continuous refresh
+                            # keep refreshing while displayed.
+                            if not plugin_settings.get('autoRefresh'):
+                                ref = refresh_action.plugin_reference
+                                if ref.refresh_interval_seconds and ref.refresh_interval_seconds < loop_manager.rotation_interval_seconds:
+                                    interval_minutes = ref.refresh_interval_seconds / 60
+                                    if interval_minutes > 0:
+                                        plugin_settings['autoRefresh'] = str(int(interval_minutes))
+                                        logger.info(f"Deriving autoRefresh={int(interval_minutes)}min from loop refresh_interval for {ref.plugin_id}")
                         self._update_auto_refresh_tracking(plugin_settings, current_dt)
 
                         # Batch config writes to reduce SD card wear
@@ -212,6 +259,7 @@ class RefreshTask:
             except Exception as e:
                 logger.exception('Exception during refresh')
                 self.refresh_result["exception"] = e  # Capture exception
+                self._set_global_status("error", f"Error: {e}")
                 # Trigger garbage collection to clean up any partially-loaded resources
                 # from failed image generation (PIL Images, HTTP connections, etc.)
                 gc.collect()
@@ -275,6 +323,39 @@ class RefreshTask:
         """Retrieves the current datetime based on the device's configured timezone."""
         tz_str = self.device_config.get_config("timezone", default="UTC")
         return datetime.now(pytz.timezone(tz_str))
+
+    def _get_display_name(self, plugin_id):
+        """Get the human-readable display name for a plugin ID."""
+        cfg = self.device_config.get_plugin(plugin_id)
+        return cfg.get("display_name", plugin_id) if cfg else plugin_id
+
+    def _set_global_status(self, stage, detail="", plugin_name="", plugin_id=""):
+        """Write current refresh status to a JSON file for the loops page to poll.
+
+        Uses atomic write (write to temp file + rename) to prevent torn reads.
+        """
+        try:
+            # Check if this plugin has its own status.json for granular stages
+            has_plugin_status = False
+            if plugin_id:
+                plugin_status_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins", plugin_id, "status.json")
+                has_plugin_status = os.path.exists(plugin_status_path)
+
+            status = {
+                "stage": stage,
+                "detail": detail,
+                "plugin_name": plugin_name,
+                "plugin_id": plugin_id,
+                "has_plugin_status": has_plugin_status,
+                "timestamp": time.time(),
+            }
+            fd, tmp_path = tempfile.mkstemp(dir=GLOBAL_STATUS_DIR, suffix='.tmp')
+            os.fchmod(fd, 0o644)
+            with os.fdopen(fd, 'w') as f:
+                json.dump(status, f)
+            os.rename(tmp_path, GLOBAL_STATUS_FILE)
+        except Exception:
+            pass  # Non-critical
 
     def _get_auto_refresh_seconds(self):
         """Check if the currently displayed plugin has auto-refresh configured.
@@ -345,10 +426,10 @@ class RefreshTask:
             'disk_percent': psutil.disk_usage('/').percent,
             'load_avg_1_5_15': os.getloadavg(),
             'swap_percent': psutil.swap_memory().percent,
-            'net_io': {
-                'bytes_sent': psutil.net_io_counters().bytes_sent,
-                'bytes_recv': psutil.net_io_counters().bytes_recv
-            }
+            'net_io': dict(
+                bytes_sent=net_io.bytes_sent,
+                bytes_recv=net_io.bytes_recv
+            ) if (net_io := psutil.net_io_counters()) else {}
         }
 
         logger.info(f"System Stats: {metrics}")

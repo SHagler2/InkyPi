@@ -19,6 +19,16 @@
     <script src="{{ url_for('static', filename='scripts/dark_mode.js') }}"></script>
 </head>
 <body>
+    <!-- Global Refresh Status Bar -->
+    <div id="loopsStatus" style="position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+        background: #1a1a2e; color: #e0e0e0; padding: 10px 16px; font-family: monospace;
+        font-size: 14px; display: none; align-items: center; gap: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+        <span id="loopsStatusIcon" style="font-size: 18px;">&#9881;</span>
+        <span id="loopsStatusText">Ready</span>
+    </div>
+    <div id="loopsStatusSpacer" style="height: 0;"></div>
+
     <div class="frame">
         <header class="header">
             <div style="display: flex; align-items: center; gap: 12px;">
@@ -26,6 +36,10 @@
                 <h1>Loops</h1>
             </div>
             <div class="header-actions">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--text-secondary); white-space: nowrap;">
+                    <input type="checkbox" id="showLoopsStatus" style="width: 16px; height: 16px; cursor: pointer;" />
+                    Live Status
+                </label>
                 <button class="settings-button dark-mode-toggle" title="Toggle Dark Mode" aria-label="Toggle Dark Mode"></button>
                 <button class="header-button" onclick="openCreateLoopModal()">+ New Loop</button>
             </div>
@@ -176,7 +190,7 @@
                     <label>Plugin:</label>
                     <select id="pluginSelect" required style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
                         <option value="">Select a plugin...</option>
-                        {% for plugin in all_plugins %}
+                        {% for plugin in all_plugins|sort(attribute='display_name') %}
                         <option value="{{ plugin.id }}">{{ plugin.display_name }}</option>
                         {% endfor %}
                     </select>
@@ -442,5 +456,155 @@
 
     <!-- Response Modal (reuse from existing) -->
     {% include 'response_modal.html' %}
+
+    <!-- Global Refresh Status Polling -->
+    <script>
+    // Exposed as window.loopsStatus so refreshPluginNow can interact with it
+    window.loopsStatus = (function() {
+        const STORAGE_KEY = 'inkypi-show-loops-status';
+        const toggle = document.getElementById('showLoopsStatus');
+        const bar = document.getElementById('loopsStatus');
+        const spacer = document.getElementById('loopsStatusSpacer');
+        const icon = document.getElementById('loopsStatusIcon');
+        const text = document.getElementById('loopsStatusText');
+
+        let hideTimeout = null;
+        let refreshInProgress = false;
+        let refreshStartTimestamp = 0;
+        let pollTimer = null;
+
+        // Restore toggle state from localStorage
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            toggle.checked = saved === 'true';
+        } catch (e) { toggle.checked = false; }
+
+        toggle.addEventListener('change', function() {
+            try { localStorage.setItem(STORAGE_KEY, toggle.checked); } catch (e) {}
+            if (toggle.checked) { startPolling(); }
+            else { stopPolling(); hideBar(); }
+        });
+
+        function showBar() {
+            bar.style.display = 'flex';
+            spacer.style.height = '44px';
+        }
+
+        function hideBar() {
+            bar.style.display = 'none';
+            spacer.style.height = '0';
+        }
+
+        function setBarStyle(stage) {
+            if (stage === 'displayed' || stage === 'rendering') {
+                bar.style.background = '#1b4332';  // Always dark — intentional contrast bar
+            } else if (stage === 'error' || stage === 'unidentified') {
+                bar.style.background = '#4a1a1a';
+            } else {
+                bar.style.background = '#1a1a2e';
+            }
+        }
+
+        const stageIcons = {
+            refreshing:  '&#9881;',    generating:  '&#9881;',
+            processing:  '&#9881;',    displaying:  '&#128228;',
+            displayed:   '&#9989;',    idle:        '&#128164;',
+            error:       '&#9888;',    starting:    '&#9881;',
+            recording:   '&#127908;',  detecting:   '&#129504;',
+            detected:    '&#127925;',  identifying: '&#128269;',
+            rendering:   '&#127912;',  unidentified:'&#10067;',
+        };
+
+        const activeStages = new Set([
+            'refreshing', 'generating', 'processing', 'displaying',
+            'starting', 'recording', 'detecting', 'detected', 'identifying', 'rendering'
+        ]);
+        const terminalStages = new Set(['displayed', 'idle', 'error', 'unidentified']);
+
+        function updateBar(stageIcon, message, stage) {
+            icon.innerHTML = stageIcon;
+            text.textContent = message || stage;
+            setBarStyle(stage);
+        }
+
+        async function pollStatus() {
+            try {
+                const r = await fetch('/static/images/plugins/refresh_status.json?t=' + Date.now());
+                if (!r.ok) return;
+                const data = await r.json();
+                if (!data || typeof data.stage !== 'string') return;
+
+                const isActive = activeStages.has(data.stage);
+                const isTerminal = terminalStages.has(data.stage);
+
+                if (isActive) {
+                    // Track the start of a new refresh cycle
+                    if (!refreshInProgress) {
+                        refreshInProgress = true;
+                        refreshStartTimestamp = data.timestamp;
+                    }
+                    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
+
+                    // Try plugin-specific status.json for granular stages (only if plugin has one)
+                    if (data.plugin_id && data.has_plugin_status) {
+                        try {
+                            const pr = await fetch('/images/' + encodeURIComponent(data.plugin_id) + '/status.json?t=' + Date.now());
+                            if (pr.ok) {
+                                const ps = await pr.json();
+                                if (ps && typeof ps.timestamp === 'number' && ps.timestamp >= refreshStartTimestamp - 2) {
+                                    updateBar(stageIcons[ps.stage] || stageIcons.generating, ps.detail, ps.stage);
+                                    showBar();
+                                    return;
+                                }
+                            }
+                        } catch (e) {}
+                    }
+
+                    updateBar(stageIcons[data.stage] || stageIcons.generating, data.detail, data.stage);
+                    showBar();
+                    return;
+                }
+
+                // Refresh just completed — show result then auto-hide
+                if (refreshInProgress && isTerminal) {
+                    refreshInProgress = false;
+                    updateBar(stageIcons[data.stage] || stageIcons.idle, data.detail, data.stage);
+                    showBar();
+                    if (hideTimeout) clearTimeout(hideTimeout);
+                    hideTimeout = setTimeout(hideBar, 4000);
+                }
+            } catch (e) {}
+        }
+
+        function startPolling() {
+            if (pollTimer) return;
+            pollTimer = setInterval(pollStatus, 800);
+        }
+
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+
+        // Start polling if toggle is already on
+        if (toggle.checked) startPolling();
+
+        // Public API for refreshPluginNow to call
+        return {
+            showImmediate: function(pluginId) {
+                refreshInProgress = true;
+                refreshStartTimestamp = Date.now() / 1000;
+                updateBar(stageIcons.refreshing, 'Updating ' + pluginId + '...', 'refreshing');
+                showBar();
+                // Temporarily start polling even if toggle is off
+                startPolling();
+            },
+            hideOnError: function() {
+                refreshInProgress = false;
+                hideBar();
+                if (!toggle.checked) stopPolling();
+            }
+        };
+    })();
+    </script>
 </body>
 </html>
