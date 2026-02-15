@@ -58,6 +58,41 @@
 </div>
 
 <div class="form-group">
+    <label class="form-label" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+        <input type="checkbox" id="pixelated" name="pixelated" style="width: 18px; height: 18px; cursor: pointer;" />
+        Pixelated Mode (Tuneshine-style)
+    </label>
+    <small style="display: block; margin-top: 5px; color: #666;">
+        Downscales album art to a chunky pixel grid for a retro LED display look
+    </small>
+</div>
+
+<div class="form-group" id="pixelSizeGroup" style="display: none;">
+    <label for="pixelSize" class="form-label">Pixel Grid Size</label>
+    <select id="pixelSize" name="pixelSize" class="form-input">
+        <option value="32">32x32 (Extra chunky)</option>
+        <option value="48">48x48</option>
+        <option value="64">64x64 (Tuneshine-style)</option>
+        <option value="80">80x80</option>
+        <option value="96">96x96 (Fine)</option>
+    </select>
+    <small style="display: block; margin-top: 5px; color: #666;">
+        Lower values = bigger pixels, more retro look
+    </small>
+</div>
+
+<div class="form-group" id="pixelStyleGroup" style="display: none;">
+    <label for="pixelStyle" class="form-label">Pixel Shape</label>
+    <select id="pixelStyle" name="pixelStyle" class="form-input">
+        <option value="round">Round LEDs (Tuneshine-style)</option>
+        <option value="square">Square blocks</option>
+    </select>
+    <small style="display: block; margin-top: 5px; color: #666;">
+        Round draws individual dots with gaps, like a real LED panel
+    </small>
+</div>
+
+<div class="form-group">
     <label for="weatherApiKey" class="form-label">OpenWeatherMap API Key (optional)</label>
     <input type="text" id="weatherApiKey" name="weatherApiKey" class="form-input"
            placeholder="Auto-detected from Weather plugin if blank" />
@@ -96,16 +131,31 @@
         const $recordingDuration = document.getElementById('recordingDuration');
         const $musicConfidence = document.getElementById('musicConfidence');
         const $fitMode = document.getElementById('fitMode');
+        const $pixelated = document.getElementById('pixelated');
+        const $pixelSize = document.getElementById('pixelSize');
+        const $pixelSizeGroup = document.getElementById('pixelSizeGroup');
+        const $pixelStyle = document.getElementById('pixelStyle');
+        const $pixelStyleGroup = document.getElementById('pixelStyleGroup');
         const $weatherApiKey = document.getElementById('weatherApiKey');
         const $geoCoordinates = document.getElementById('geoCoordinates');
         const $units = document.getElementById('units');
         const $showStatus = document.getElementById('showStatus');
+
+        function togglePixelSizeVisibility() {
+            const show = $pixelated.checked ? 'block' : 'none';
+            $pixelSizeGroup.style.display = show;
+            $pixelStyleGroup.style.display = show;
+        }
+        $pixelated.addEventListener('change', togglePixelSizeVisibility);
 
         if (loadPluginSettings) {
             $autoRefresh.value = pluginSettings.autoRefresh || '';
             $recordingDuration.value = pluginSettings.recordingDuration || 5;
             $musicConfidence.value = pluginSettings.musicConfidence || 0.2;
             $fitMode.value = pluginSettings.fitMode || 'fit';
+            $pixelated.checked = pluginSettings.pixelated === 'on' || pluginSettings.pixelated === true;
+            $pixelSize.value = pluginSettings.pixelSize || '64';
+            $pixelStyle.value = pluginSettings.pixelStyle || 'round';
             $weatherApiKey.value = pluginSettings.weatherApiKey || '';
             $geoCoordinates.value = pluginSettings.geoCoordinates || '';
             $units.value = pluginSettings.units || 'imperial';
@@ -115,11 +165,15 @@
             $recordingDuration.value = 5;
             $musicConfidence.value = 0.2;
             $fitMode.value = 'fit';
+            $pixelated.checked = false;
+            $pixelSize.value = '64';
+            $pixelStyle.value = 'round';
             $weatherApiKey.value = '';
             $geoCoordinates.value = '';
             $units.value = 'imperial';
             $showStatus.checked = true;
         }
+        togglePixelSizeVisibility();
 
         // Status polling
         const stageLabels = {

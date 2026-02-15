@@ -27,7 +27,7 @@ DEFAULT_IMAGE_PATH = os.path.join(PLUGIN_DIR, "resources", "default.jpg")
 
 RAW_SAMPLE_RATE = 44100
 DOWN_SAMPLE_RATE = 16000
-AUDIO_GAIN = 3.0
+AUDIO_GAIN = 5.0
 WEATHER_CACHE_MINUTES = 30
 STATUS_FILE = os.path.join(PLUGIN_DIR, "status.json")
 
@@ -69,7 +69,7 @@ class ShazamPi(BasePlugin):
         if device_config.get_config("orientation") == "vertical":
             dimensions = dimensions[::-1]
 
-        recording_duration = int(settings.get("recordingDuration", 5))
+        recording_duration = int(settings.get("recordingDuration", 7))
 
         # 1. Record audio from USB mic
         self._set_status("recording", f"Recording {recording_duration}s of audio...")
@@ -77,7 +77,7 @@ class ShazamPi(BasePlugin):
 
         # 2. Detect music via YAMNet
         self._set_status("detecting", "Analyzing audio for music...")
-        confidence = float(settings.get("musicConfidence", 0.2))
+        confidence = float(settings.get("musicConfidence", 0.15))
         is_music, top_class, top_score = self._detect_music(raw_audio, recording_duration, confidence)
         self._set_status("detected", f"{top_class} ({top_score:.0%})")
 
@@ -103,7 +103,7 @@ class ShazamPi(BasePlugin):
         logger.info("No music detected, showing idle display")
         self._shazam_fail_count = 0
         self._set_status("idle", f"No music detected ({top_class} {top_score:.0%})")
-        return self._render_idle(dimensions, settings, device_config)
+        return self._render_idle(dimensions, settings, device_config, status_note="No Music Detected")
 
     # ========== Audio Recording ==========
 
@@ -247,6 +247,9 @@ class ShazamPi(BasePlugin):
 
     def _render_song(self, song, dimensions, settings):
         fit_mode = settings.get("fitMode", "fit")
+        pixelated = settings.get("pixelated") == "on"
+        pixel_size = int(settings.get("pixelSize", 64))
+        led_style = settings.get("pixelStyle", "round") == "round"
 
         album_art_url = song.get('album_art')
         if album_art_url:
@@ -262,16 +265,103 @@ class ShazamPi(BasePlugin):
             )
 
         if image:
+            if pixelated:
+                image = self._apply_pixelated(image, dimensions, pixel_size, led_style)
+
             # Add title/artist overlay at bottom
             image = self._add_title_overlay(
                 image, song['title'], song.get('artist', '')
             )
-            # In fit mode, add rotated "Now Playing..." in the left letterbox bar
-            if fit_mode == 'fit':
+            # In fit mode (non-pixelated), add rotated "Now Playing..." in the left letterbox bar
+            if fit_mode == 'fit' and not pixelated:
                 image = self._add_now_playing_label(image)
 
         logger.info("=== ShazamPi Plugin: Song image generated ===")
         return image
+
+    # Inky Impression 7-color ACeP palette
+    EINK_PALETTE = [
+        (0, 0, 0),        # Black
+        (255, 255, 255),   # White
+        (0, 128, 0),       # Green
+        (0, 0, 255),       # Blue
+        (255, 0, 0),       # Red
+        (255, 255, 0),     # Yellow
+        (255, 128, 0),     # Orange
+    ]
+
+    def _snap_to_palette(self, tiny):
+        """Map each pixel to the nearest 7-color e-ink palette color.
+        No error diffusion — each dot becomes a single clean color so the
+        display driver doesn't need to dither within/around dots."""
+        import numpy as np
+
+        img = np.array(tiny, dtype=np.float32)
+        palette = np.array(self.EINK_PALETTE, dtype=np.float32)
+        h, w, _ = img.shape
+
+        for y in range(h):
+            for x in range(w):
+                dists = np.sum((palette - img[y, x]) ** 2, axis=1)
+                img[y, x] = palette[np.argmin(dists)]
+
+        return Image.fromarray(img.astype(np.uint8))
+
+    def _apply_pixelated(self, image, dimensions, pixel_size, led_style=True):
+        """Downscale album art to pixel_size x pixel_size then render as
+        round LED dots on a black canvas to simulate a Tuneshine-style display."""
+        width, height = dimensions
+        # Use the shorter dimension to make a square pixel grid
+        square = min(width, height)
+
+        # Crop to center square from the image
+        img_w, img_h = image.size
+        if img_w != img_h:
+            crop_size = min(img_w, img_h)
+            left = (img_w - crop_size) // 2
+            top = (img_h - crop_size) // 2
+            image = image.crop((left, top, left + crop_size, top + crop_size))
+
+        # Downscale to tiny pixel grid
+        tiny = image.resize((pixel_size, pixel_size), Image.LANCZOS)
+
+        # Palette snapping disabled — let display driver handle color mapping
+        # tiny = self._snap_to_palette(tiny)
+
+        if led_style:
+            # Draw round LED dots
+            canvas = Image.new('RGB', dimensions, (0, 0, 0))
+            draw = ImageDraw.Draw(canvas)
+
+            cell_size = square / pixel_size
+            dot_radius = cell_size * 0.4  # 80% fill — leaves visible gap between dots
+            offset_x = (width - square) // 2
+            offset_y = (height - square) // 2
+
+            pixels = tiny.load()
+            for py in range(pixel_size):
+                for px in range(pixel_size):
+                    color = pixels[px, py]
+                    # Skip black pixels to save time and keep background clean
+                    if isinstance(color, tuple) and sum(color[:3]) < 15:
+                        continue
+                    cx = offset_x + px * cell_size + cell_size / 2
+                    cy = offset_y + py * cell_size + cell_size / 2
+                    draw.ellipse(
+                        [cx - dot_radius, cy - dot_radius,
+                         cx + dot_radius, cy + dot_radius],
+                        fill=color
+                    )
+        else:
+            # Square pixel blocks (nearest-neighbor upscale)
+            pixelated = tiny.resize((square, square), Image.NEAREST)
+            canvas = Image.new('RGB', dimensions, (0, 0, 0))
+            offset_x = (width - square) // 2
+            offset_y = (height - square) // 2
+            canvas.paste(pixelated, (offset_x, offset_y))
+
+        logger.info(f"Applied pixelated effect: {pixel_size}x{pixel_size} grid, led_style={led_style}")
+        return canvas
 
     def _add_now_playing_label(self, image):
         """Add rotated 'Now Playing...' text in the left black letterbox bar."""
@@ -341,103 +431,182 @@ class ShazamPi(BasePlugin):
             return self._render_song(self._last_song, dimensions, settings)
 
         logger.info("=== ShazamPi Plugin: Unidentified, no prior song ===")
-        return self._render_idle(dimensions, settings, device_config)
+        return self._render_idle(dimensions, settings, device_config, status_note="Song Not Identified")
 
-    def _render_idle(self, dimensions, settings, device_config):
+    # OWM icon code -> local weather plugin icon file mapping
+    # Night codes without a local night variant fall back to the day version
+    _ICON_NIGHT_FALLBACK = {
+        "03n": "03d", "04n": "04d", "09n": "09d",
+        "11n": "11d", "13n": "13d", "50n": "50d",
+    }
+
+    def _load_weather_icon(self, icon_code, size=200):
+        """Load a weather icon from the weather plugin's local icons directory."""
+        weather_icons_dir = os.path.join(
+            os.path.dirname(PLUGIN_DIR), "weather", "icons"
+        )
+        # Try exact code first, then night fallback, then default
+        candidates = [icon_code, self._ICON_NIGHT_FALLBACK.get(icon_code), "01d"]
+        for code in candidates:
+            if code is None:
+                continue
+            path = os.path.join(weather_icons_dir, f"{code}.png")
+            if os.path.exists(path):
+                try:
+                    icon = Image.open(path).convert("RGBA")
+                    icon = icon.resize((size, size), Image.LANCZOS)
+                    return icon
+                except Exception as e:
+                    logger.debug(f"Failed to load weather icon {path}: {e}")
+        return None
+
+    def _render_idle(self, dimensions, settings, device_config, status_note="No Music Detected"):
+        from utils.app_utils import get_font
+
         width, height = dimensions
         weather = self._get_weather(settings, device_config)
 
-        # Create black canvas
-        canvas = Image.new('RGB', dimensions, (0, 0, 0))
-
-        # Try to load weather icon centered on screen
-        icon_img = None
-        if weather and weather.get('icon_url'):
-            try:
-                icon_img = self.image_loader.from_url(
-                    weather['icon_url'], (300, 300), timeout_ms=10000, fit_mode='fit'
-                )
-            except Exception as e:
-                logger.debug(f"Failed to load weather icon: {e}")
-
-        # Load fonts
-        try:
-            temp_font = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                max(40, int(height * 0.10))
-            )
-            desc_font = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                max(28, int(height * 0.06))
-            )
-        except Exception:
-            temp_font = ImageFont.load_default()
-            desc_font = temp_font
-
+        # Dark background
+        bg_color = (26, 26, 26)
+        canvas = Image.new('RGB', dimensions, bg_color)
         draw = ImageDraw.Draw(canvas)
-        padding = 10
 
-        if weather:
-            temp_text = weather['temperature']
-            desc_text = weather['weather_sub_description']
-        else:
-            temp_text = "Listening..."
-            desc_text = "No music detected"
+        # Color palette
+        color_temp = (241, 122, 36)     # Orange accent for temperature
+        color_secondary = (204, 204, 204)  # Light gray for secondary text
+        color_white = (255, 255, 255)
+        color_subtle = (100, 100, 100)  # Subtle gray for note
 
-        # Measure text
-        temp_bbox = draw.textbbox((0, 0), temp_text, font=temp_font)
-        temp_h = temp_bbox[3] - temp_bbox[1]
-        temp_w = temp_bbox[2] - temp_bbox[0]
-
-        desc_bbox = draw.textbbox((0, 0), desc_text, font=desc_font)
-        desc_h = desc_bbox[3] - desc_bbox[1]
-        desc_w = desc_bbox[2] - desc_bbox[0]
-
-        # Calculate vertical layout: icon + temp + description, raised up
-        icon_h = 300 if icon_img else 0
-        gap_after_icon = 15
-        gap_after_temp = 20
-        total_h = icon_h + (gap_after_icon if icon_img else 0) + temp_h + gap_after_temp + desc_h
-        start_y = (height - total_h) // 2 - int(height * 0.06)  # Shift up
-
-        # Draw weather icon centered
-        if icon_img:
-            icon_x = (width - icon_img.size[0]) // 2
-            canvas.paste(icon_img, (icon_x, start_y))
-            start_y += icon_h + gap_after_icon
-
-        # Draw temperature
-        draw.text(
-            ((width - temp_w) // 2, start_y),
-            temp_text, font=temp_font, fill=(255, 255, 255)
-        )
-        start_y += temp_h + gap_after_temp
-
-        # Draw description
-        draw.text(
-            ((width - desc_w) // 2, start_y),
-            desc_text, font=desc_font, fill=(180, 180, 180)
-        )
-
-        # Note at bottom right
-        try:
-            small_font = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                max(12, int(height * 0.03))
+        if weather and weather.get('icon_code'):
+            self._render_idle_weather(
+                canvas, draw, weather, width, height,
+                color_temp, color_secondary, color_white, color_subtle, get_font,
+                status_note
             )
-        except Exception:
-            small_font = ImageFont.load_default()
-        note = "No Music Playing or Song Not Found"
-        note_bbox = draw.textbbox((0, 0), note, font=small_font)
-        note_w = note_bbox[2] - note_bbox[0]
-        note_h = note_bbox[3] - note_bbox[1]
-        draw.text(
-            (width - note_w - 10, height - note_h - 8),
-            note, font=small_font, fill=(100, 100, 100)
-        )
+        else:
+            self._render_idle_no_weather(
+                canvas, draw, width, height, color_white, color_subtle, get_font,
+                status_note
+            )
 
         logger.info("=== ShazamPi Plugin: Idle image generated ===")
         return canvas
+
+    def _render_idle_weather(self, canvas, draw, weather, width, height,
+                             color_temp, color_secondary, color_white, color_subtle, get_font,
+                             status_note="No Music Detected"):
+        """Render idle screen with weather data: icon left, text right, centered."""
+        icon_size = min(200, int(height * 0.42))
+        icon_img = self._load_weather_icon(weather.get('icon_code', '01d'), icon_size)
+
+        # Font sizes
+        temp_size = max(48, int(height * 0.12))
+        detail_size = max(22, int(height * 0.05))
+        note_size = max(14, int(height * 0.032))
+
+        temp_font = get_font("Jost", temp_size, "bold") or ImageFont.load_default()
+        detail_font = get_font("Jost", detail_size, "normal") or ImageFont.load_default()
+        note_font = get_font("Jost", note_size, "normal") or ImageFont.load_default()
+
+        # Text lines
+        temp_text = weather['temperature']
+        feels_text = f"Feels Like {weather.get('feels_like', '')}"
+        hilo_text = f"{weather.get('temp_high', '')} / {weather.get('temp_low', '')}"
+        desc_text = weather.get('description', '')
+
+        # Measure text block height (use 1.15x multiplier for large font visual height)
+        temp_line_h = int(temp_size * 1.15)
+        detail_line_h = int(detail_size * 1.15)
+        line_gap = int(height * 0.01)
+
+        text_block_h = temp_line_h + (detail_line_h + line_gap) * 3
+        icon_actual = icon_img.size[1] if icon_img else 0
+        content_h = max(text_block_h, icon_actual)
+
+        # Vertical center for the content block (shifted up slightly)
+        content_y = (height - content_h) // 2 - int(height * 0.04)
+
+        # Horizontal layout: icon on left, text on right, both centered as a group
+        gap_between = int(width * 0.03)
+        icon_w = icon_img.size[0] if icon_img else 0
+
+        # Measure widest text line for total width calc
+        text_widths = []
+        for text, font in [(temp_text, temp_font), (feels_text, detail_font),
+                           (hilo_text, detail_font), (desc_text, detail_font)]:
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_widths.append(bbox[2] - bbox[0])
+        max_text_w = max(text_widths)
+
+        total_content_w = icon_w + gap_between + max_text_w
+        content_x = (width - total_content_w) // 2
+
+        # Draw weather icon (vertically centered within content block)
+        if icon_img:
+            icon_y = content_y + (content_h - icon_actual) // 2
+            canvas.paste(icon_img, (content_x, icon_y), icon_img)
+
+        # Draw text block (vertically centered within content block)
+        text_x = content_x + icon_w + gap_between
+        text_y = content_y + (content_h - text_block_h) // 2
+
+        # Temperature
+        draw.text((text_x, text_y), temp_text, font=temp_font, fill=color_temp)
+        text_y += temp_line_h
+
+        # Feels like
+        draw.text((text_x, text_y), feels_text, font=detail_font, fill=color_secondary)
+        text_y += detail_line_h + line_gap
+
+        # Hi / Lo
+        draw.text((text_x, text_y), hilo_text, font=detail_font, fill=color_secondary)
+        text_y += detail_line_h + line_gap
+
+        # Description
+        draw.text((text_x, text_y), desc_text, font=detail_font, fill=color_white)
+
+        # Status note at bottom center
+        note = status_note
+        note_bbox = draw.textbbox((0, 0), note, font=note_font)
+        note_w = note_bbox[2] - note_bbox[0]
+        draw.text(
+            ((width - note_w) // 2, height - int(height * 0.08)),
+            note, font=note_font, fill=color_subtle
+        )
+
+    def _render_idle_no_weather(self, canvas, draw, width, height,
+                                color_white, color_subtle, get_font,
+                                status_note="No Music Detected"):
+        """Render idle screen when no weather data is available."""
+        main_size = max(36, int(height * 0.08))
+        sub_size = max(20, int(height * 0.04))
+
+        main_font = get_font("Jost", main_size, "bold") or ImageFont.load_default()
+        sub_font = get_font("Jost", sub_size, "normal") or ImageFont.load_default()
+
+        main_text = "Listening..."
+        sub_text = status_note
+
+        main_bbox = draw.textbbox((0, 0), main_text, font=main_font)
+        main_w = main_bbox[2] - main_bbox[0]
+        main_h = int(main_size * 1.15)
+
+        sub_bbox = draw.textbbox((0, 0), sub_text, font=sub_font)
+        sub_w = sub_bbox[2] - sub_bbox[0]
+        sub_h = int(sub_size * 1.15)
+
+        gap = int(height * 0.02)
+        total_h = main_h + gap + sub_h
+        start_y = (height - total_h) // 2 - int(height * 0.04)
+
+        draw.text(
+            ((width - main_w) // 2, start_y),
+            main_text, font=main_font, fill=color_white
+        )
+        draw.text(
+            ((width - sub_w) // 2, start_y + main_h + gap),
+            sub_text, font=sub_font, fill=color_subtle
+        )
 
     # ========== Weather ==========
 
@@ -501,15 +670,21 @@ class ShazamPi(BasePlugin):
             temp_unit = {'metric': '\u00b0C', 'imperial': '\u00b0F'}.get(units, 'K')
             temperature = str(round(data['main']['temp'])) + temp_unit
             feels_like = str(round(data['main']['feels_like'])) + temp_unit
+            temp_high = str(round(data['main']['temp_max'])) + temp_unit
+            temp_low = str(round(data['main']['temp_min'])) + temp_unit
             condition = data['weather'][0]['description']
 
             icon_code = data['weather'][0].get('icon', '01d')
-            icon_url = f"https://openweathermap.org/img/wn/{icon_code}@4x.png"
 
             self._last_weather = {
                 'temperature': temperature,
+                'feels_like': feels_like,
+                'temp_high': temp_high,
+                'temp_low': temp_low,
+                'description': condition.title(),
+                'icon_code': icon_code,
+                # Keep legacy fields for compatibility
                 'weather_sub_description': f"Feels like {feels_like}. {condition}".title(),
-                'icon_url': icon_url,
             }
             self._last_weather_fetch = datetime.datetime.now()
             return self._last_weather
