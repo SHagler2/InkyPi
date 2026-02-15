@@ -44,6 +44,22 @@ def plugin_page(plugin_id):
             # If in edit mode, use existing settings from the loop
             if edit_mode and existing_settings:
                 template_params["plugin_settings"] = existing_settings
+            elif not edit_mode:
+                # Try to inherit settings so users don't re-enter preferences.
+                # Priority: 1) last-used settings, 2) existing loop instance
+                last_used = device_config.get_config(
+                    f"plugin_last_settings_{plugin_id}", default=None
+                )
+                if last_used:
+                    template_params["plugin_settings"] = last_used
+                else:
+                    for loop in loop_manager.loops:
+                        for ref in loop.plugin_order:
+                            if ref.plugin_id == plugin_id and ref.plugin_settings:
+                                template_params["plugin_settings"] = dict(ref.plugin_settings)
+                                break
+                        if "plugin_settings" in template_params:
+                            break
         except Exception as e:
             logger.exception("EXCEPTION CAUGHT: " + str(e))
             return jsonify({"error": f"An error occurred: {str(e)}"}), 500
@@ -91,6 +107,11 @@ def update_now_async():
         plugin_settings.update(handle_request_files(request.files))
         plugin_id = plugin_settings.pop("plugin_id")
 
+        # Remember settings for next time the plugin page is opened
+        device_config.update_value(
+            f"plugin_last_settings_{plugin_id}", dict(plugin_settings)
+        )
+
         if refresh_task.running:
             queued = refresh_task.queue_manual_update(ManualRefresh(plugin_id, plugin_settings))
             if queued:
@@ -114,6 +135,11 @@ def update_now():
         plugin_settings = parse_form(request.form)
         plugin_settings.update(handle_request_files(request.files))
         plugin_id = plugin_settings.pop("plugin_id")
+
+        # Remember settings for next time the plugin page is opened
+        device_config.update_value(
+            f"plugin_last_settings_{plugin_id}", dict(plugin_settings)
+        )
 
         # For stocks plugin, merge in saved settings (autoRefresh, etc.) if not in form
         if plugin_id == "stocks":

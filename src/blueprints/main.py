@@ -210,6 +210,23 @@ def get_next_change_time():
         "next_plugin": next_plugin_name
     })
 
+@main_bp.route('/api/weather_location')
+def get_weather_location():
+    """Return the weather plugin's saved location for use as a default by other plugins."""
+    device_config = current_app.config['DEVICE_CONFIG']
+    try:
+        loop_manager = device_config.get_loop_manager()
+        for loop in loop_manager.loops:
+            for ref in loop.plugin_order:
+                if ref.plugin_id == "weather" and ref.plugin_settings:
+                    lat = ref.plugin_settings.get("latitude")
+                    lon = ref.plugin_settings.get("longitude")
+                    if lat is not None and lon is not None:
+                        return jsonify({"latitude": lat, "longitude": lon})
+    except Exception:
+        pass
+    return jsonify({"latitude": None, "longitude": None})
+
 def format_time(seconds):
     """Format seconds into human-readable time."""
     if seconds < 60:

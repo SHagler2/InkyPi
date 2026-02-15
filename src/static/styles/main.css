@@ -266,6 +266,49 @@ body {
     line-height: 1.4;
 }
 
+/* Live Refresh Status Card */
+.live-status-card {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    box-shadow: 0 2px 8px var(--shadow-light);
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.live-status-card .live-status-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.live-status-card .live-status-text {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.live-status-card.status-active {
+    background: var(--bg-primary);
+    border-color: var(--accent-primary);
+}
+
+.live-status-card.status-success {
+    background: color-mix(in srgb, var(--success-color) 10%, var(--bg-primary));
+    border-color: var(--success-color);
+}
+
+.live-status-card.status-error {
+    background: color-mix(in srgb, var(--failure-color) 10%, var(--bg-primary));
+    border-color: var(--failure-color);
+}
+
 /* Status Dashboard Card */
 .status-dashboard-card {
     background: var(--bg-secondary);

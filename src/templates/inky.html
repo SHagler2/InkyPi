@@ -343,16 +343,6 @@
     <script src="{{ url_for('static', filename='scripts/image_modal.js') }}"></script>
 </head>
 <body>
-    <!-- Global Refresh Status Bar -->
-    <div id="mainStatus" style="position: fixed; top: 0; left: 0; right: 0; z-index: 999;
-        background: #1a1a2e; color: #e0e0e0; padding: 10px 16px; font-family: monospace;
-        font-size: 14px; display: none; align-items: center; gap: 10px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-        <span id="mainStatusIcon" style="font-size: 18px;">&#9881;</span>
-        <span id="mainStatusText">Ready</span>
-    </div>
-    <div id="mainStatusSpacer" style="height: 0;"></div>
-
     <script src="{{ url_for('static', filename='scripts/dark_mode.js') }}"></script>
     <!-- Main container -->
     <div class="frame">
@@ -380,6 +370,12 @@
                 </a>
             </div>
         </header>
+
+        <!-- Live Refresh Status -->
+        <div id="mainStatus" class="live-status-card">
+            <span id="mainStatusIcon" class="live-status-icon">&#9881;</span>
+            <span id="mainStatusText" class="live-status-text">Ready</span>
+        </div>
 
         <!-- Status Dashboard Card -->
         <div class="status-dashboard-card" style="padding: 12px 16px; display: block;">
@@ -606,7 +602,6 @@
         const STORAGE_KEY = 'inkypi-show-main-status';
         const toggle = document.getElementById('showMainStatus');
         const bar = document.getElementById('mainStatus');
-        const spacer = document.getElementById('mainStatusSpacer');
         const icon = document.getElementById('mainStatusIcon');
         const text = document.getElementById('mainStatusText');
 
@@ -629,21 +624,20 @@
 
         function showBar() {
             bar.style.display = 'flex';
-            spacer.style.height = '44px';
         }
 
         function hideBar() {
             bar.style.display = 'none';
-            spacer.style.height = '0';
         }
 
         function setBarStyle(stage) {
+            bar.classList.remove('status-success', 'status-error', 'status-active');
             if (stage === 'displayed' || stage === 'rendering') {
-                bar.style.background = '#1b4332';
+                bar.classList.add('status-success');
             } else if (stage === 'error' || stage === 'unidentified') {
-                bar.style.background = '#4a1a1a';
+                bar.classList.add('status-error');
             } else {
-                bar.style.background = '#1a1a2e';
+                bar.classList.add('status-active');
             }
         }
 

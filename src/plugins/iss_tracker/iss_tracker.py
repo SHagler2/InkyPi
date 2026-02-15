@@ -27,6 +27,11 @@ class ISSTracker(BasePlugin):
     def generate_settings_template(self):
         template_params = super().generate_settings_template()
         template_params['style_settings'] = False
+        template_params['api_key'] = {
+            "required": False,
+            "service": "N2YO",
+            "expected_key": "N2YO_SECRET"
+        }
         return template_params
 
     def generate_image(self, settings, device_config):
@@ -56,8 +61,9 @@ class ISSTracker(BasePlugin):
         now_utc = datetime.now(timezone.utc)
         iss_lat, iss_lon, iss_alt_km = _compute_iss_position(tle_lines, now_utc)
 
+        n2yo_api_key = device_config.load_env_key("N2YO_SECRET")
         passes = _predict_passes(
-            tle_lines, lat, lon, now_utc, settings.get("n2yoApiKey")
+            tle_lines, lat, lon, now_utc, n2yo_api_key
         )
 
         mode = _determine_mode(now_utc, passes, prepass_minutes)

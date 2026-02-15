@@ -17,7 +17,7 @@
     <input readonly type="text" id="longitude" name="longitude" class="form-input" style="width: 100px;" />
     <button type="button" id="openMap" class="action-button compact">Select on Map</button>
 </div>
-<div style="font-size: 12px; color: #888; margin-bottom: 15px;">If left empty, your Weather plugin location will be used automatically.</div>
+<div id="locationSource" style="font-size: 12px; color: #888; margin-bottom: 15px;"></div>
 
 <!-- Settings -->
 <div class="form-group">
@@ -46,11 +46,6 @@
         <option value="20">20 minutes before</option>
         <option value="30">30 minutes before</option>
     </select>
-</div>
-
-<div class="form-group">
-    <label for="n2yoApiKey" class="form-label">N2YO API Key (optional fallback):</label>
-    <input type="text" id="n2yoApiKey" name="n2yoApiKey" class="form-input" placeholder="Optional - for pass prediction fallback" />
 </div>
 
 <div id="mapModal" class="modal">
@@ -107,6 +102,8 @@
     function selectCity(lat, lon, displayName) {
         document.getElementById('latitude').value = lat;
         document.getElementById('longitude').value = lon;
+        document.getElementById('locationSource').innerHTML =
+            '<span style="color: #155724;">Custom location set</span>';
         document.getElementById('cityResults').innerHTML =
             `<div style="padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; font-size: 14px; color: #155724;">
                 Selected: ${displayName}<br>
@@ -114,12 +111,13 @@
             </div>`;
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
         const OSM_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
         const $latitude = document.querySelector('#latitude');
         const $longitude = document.querySelector('#longitude');
         const $openMap = document.querySelector('#openMap');
         const $closeMap = document.querySelector('#closeMap');
+        const $locationSource = document.querySelector('#locationSource');
 
         document.getElementById('searchCityBtn').addEventListener('click', searchCity);
 
@@ -129,6 +127,48 @@
                 searchCity();
             }
         });
+
+        // Load saved settings or defaults
+        let hasCustomLocation = false;
+
+        if (loadPluginSettings) {
+            document.getElementById('latitude').value = pluginSettings.latitude || '';
+            document.getElementById('longitude').value = pluginSettings.longitude || '';
+            document.getElementById('units').value = pluginSettings.units || 'metric';
+            document.getElementById('autoRefresh').value = pluginSettings.autoRefresh || '5';
+            document.getElementById('prepassTrigger').value = pluginSettings.prepassTrigger || '20';
+            hasCustomLocation = !!(pluginSettings.latitude && pluginSettings.longitude);
+        } else {
+            document.getElementById('latitude').value = "";
+            document.getElementById('longitude').value = "";
+            document.getElementById('units').value = "metric";
+            document.getElementById('autoRefresh').value = "5";
+            document.getElementById('prepassTrigger').value = "20";
+        }
+
+        // Fetch weather plugin location as fallback/default display
+        try {
+            const resp = await fetch('/api/weather_location');
+            const data = await resp.json();
+            if (data.latitude && data.longitude) {
+                if (!hasCustomLocation) {
+                    // Show weather location as the effective default
+                    $latitude.value = data.latitude;
+                    $longitude.value = data.longitude;
+                    $locationSource.innerHTML = 'Using Weather plugin location. Search above to override.';
+                } else {
+                    $locationSource.innerHTML = 'Custom location set. Clear to use Weather plugin default.';
+                }
+            } else {
+                if (!hasCustomLocation) {
+                    $locationSource.innerHTML = 'No location set. Search for a city or set one in the Weather plugin.';
+                }
+            }
+        } catch (e) {
+            if (!hasCustomLocation) {
+                $locationSource.innerHTML = 'No location set. Search for a city above.';
+            }
+        }
 
         let latitude = +$latitude.value;
         let longitude = +$longitude.value;
@@ -155,23 +195,8 @@
             const position = marker.getLatLng().wrap();
             $latitude.value = position.lat;
             $longitude.value = position.lng;
+            $locationSource.innerHTML = '<span style="color: #155724;">Custom location set</span>';
             closeModal('mapModal');
         });
-
-        if (loadPluginSettings) {
-            document.getElementById('latitude').value = pluginSettings.latitude || '';
-            document.getElementById('longitude').value = pluginSettings.longitude || '';
-            document.getElementById('units').value = pluginSettings.units || 'metric';
-            document.getElementById('autoRefresh').value = pluginSettings.autoRefresh || '5';
-            document.getElementById('prepassTrigger').value = pluginSettings.prepassTrigger || '20';
-            document.getElementById('n2yoApiKey').value = pluginSettings.n2yoApiKey || '';
-        } else {
-            // Defaults - if lat/lon left empty, server will try weather plugin's location
-            document.getElementById('latitude').value = "";
-            document.getElementById('longitude').value = "";
-            document.getElementById('units').value = "metric";
-            document.getElementById('autoRefresh').value = "5";
-            document.getElementById('prepassTrigger').value = "20";
-        }
     });
 </script>
