@@ -1,6 +1,9 @@
 from plugins.base_plugin.base_plugin import BasePlugin
 from openai import OpenAI
 from datetime import datetime
+from PIL import Image, ImageDraw
+from utils.app_utils import get_font
+from utils.text_utils import draw_multiline_text, measure_text_block, get_text_dimensions
 import logging
 import random
 
@@ -55,18 +58,59 @@ class AIText(BasePlugin):
         if device_config.get_config("orientation") == "vertical":
             dimensions = dimensions[::-1]
 
-        # Convert literal \n to HTML line breaks
-        formatted_response = prompt_response.replace('\\n', '<br>').replace('\n', '<br>')
+        # Convert literal \n to actual newlines for PIL rendering
+        formatted_response = prompt_response.replace('\\n', '\n')
 
-        image_template_params = {
-            "title": title,
-            "content": formatted_response,
-            "plugin_settings": settings
-        }
-
-        image = self.render_image(dimensions, "ai_text.html", "ai_text.css", image_template_params)
+        image = self._render_pil(dimensions, title, formatted_response, settings)
 
         logger.info("=== AI Text Plugin: Text generation complete ===")
+        return image
+
+    def _render_pil(self, dimensions, title, content, settings):
+        width, height = dimensions
+        bg_color = settings.get("backgroundColor", "#ffffff")
+        text_color = settings.get("textColor", "#000000")
+
+        margin = int(width * 0.05)
+        content_width = width - margin * 2
+
+        image = Image.new("RGBA", dimensions, bg_color)
+        draw = ImageDraw.Draw(image)
+
+        # Scale fonts relative to screen size
+        title_size = int(min(height * 0.08, width * 0.07))
+        content_size = int(min(height * 0.055, width * 0.045))
+
+        title_font = get_font("Jost", title_size, "bold")
+        content_font = get_font("Jost", content_size)
+
+        y_cursor = margin
+
+        # Draw title
+        if title:
+            tw = get_text_dimensions(draw, title.upper(), title_font)[0]
+            title_visual_h = int(title_size * 1.15)
+            tx = (width - tw) // 2
+            draw.text((tx, y_cursor), title.upper(), font=title_font, fill=text_color)
+            y_cursor += title_visual_h + int(height * 0.015)
+            # Title underline
+            line_x0 = (width - tw) // 2
+            line_x1 = line_x0 + tw
+            draw.line((line_x0, y_cursor, line_x1, y_cursor), fill=text_color, width=2)
+            y_cursor += int(height * 0.03)
+
+        # Draw quoted content, centered
+        available_height = height - y_cursor - margin
+        quoted = f'"{content}"'
+
+        # Measure to vertically center content in remaining space
+        block_height = measure_text_block(draw, quoted, content_font, content_width, line_spacing=int(content_size * 0.5))
+        if block_height < available_height:
+            y_cursor += (available_height - block_height) // 2
+
+        draw_multiline_text(draw, quoted, (margin, y_cursor), content_font, text_color,
+                            content_width, line_spacing=int(content_size * 0.5), align="center")
+
         return image
 
     def _generate_with_openai(self, settings, device_config, text_prompt):

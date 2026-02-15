@@ -1,4 +1,8 @@
 from plugins.base_plugin.base_plugin import BasePlugin
+from PIL import Image, ImageDraw
+from utils.app_utils import get_font
+from utils.text_utils import get_text_dimensions, truncate_text
+from utils.layout_utils import calculate_grid
 import yfinance as yf
 import logging
 from datetime import datetime
@@ -13,7 +17,7 @@ FONT_SIZES = {
     "x-large": 1.5
 }
 
-COUNT_SCALES = {1: 2.2, 2: 1.6, 3: 1.2, 4: 1.15, 5: 0.9, 6: 0.85}
+COUNT_SCALES = {1: 1.7, 2: 1.35, 3: 1.2, 4: 1.15, 5: 0.9, 6: 0.85}
 GRID_COLUMNS = {1: 1, 2: 2, 3: 3, 4: 2, 5: 3, 6: 3}
 
 
@@ -69,27 +73,148 @@ class Stocks(BasePlugin):
         stock_count = len(stocks_data)
         columns = GRID_COLUMNS.get(stock_count, 3)
         rows = (stock_count + columns - 1) // columns
-        # Get auto-refresh interval for display
         auto_refresh = settings.get('autoRefresh', '0')
         try:
             auto_refresh_mins = int(auto_refresh)
         except (ValueError, TypeError):
             auto_refresh_mins = 0
 
-        template_params = {
-            "title": title,
-            "stocks": stocks_data,
-            "stock_count": stock_count,
-            "columns": columns,
-            "rows": rows,
-            "last_updated": datetime.now().strftime("%I:%M %p"),
-            "auto_refresh_mins": auto_refresh_mins,
-            "font_scale": FONT_SIZES.get(settings.get('fontSize', 'normal'), 1),
-            "count_scale": COUNT_SCALES.get(stock_count, 0.65),
-            "plugin_settings": settings
-        }
+        font_scale = FONT_SIZES.get(settings.get('fontSize', 'normal'), 1)
+        count_scale = COUNT_SCALES.get(stock_count, 0.65)
+        last_updated = datetime.now().strftime("%I:%M %p")
 
-        image = self.render_image(dimensions, "stocks.html", "stocks.css", template_params)
+        return self._render_pil(dimensions, title, stocks_data, columns, rows,
+                                last_updated, auto_refresh_mins,
+                                font_scale * count_scale, settings)
+
+    def _render_pil(self, dimensions, title, stocks, columns, rows,
+                    last_updated, auto_refresh_mins, scale, settings):
+        width, height = dimensions
+        bg_color = settings.get("backgroundColor", "#ffffff")
+        text_color = settings.get("textColor", "#000000")
+
+        image = Image.new("RGBA", dimensions, bg_color)
+        draw = ImageDraw.Draw(image)
+
+        margin = int(width * 0.03)
+        y_top = margin
+
+        # Font sizes
+        title_size = int(min(height * 0.05, width * 0.05) * scale)
+        symbol_size = int(min(height * 0.07, width * 0.07) * scale)
+        price_size = int(min(height * 0.065, width * 0.065) * scale)
+        change_size = int(min(height * 0.05, width * 0.05) * scale)
+        detail_size = int(min(height * 0.035, width * 0.035) * scale)
+        footer_size = int(min(height * 0.035, width * 0.035) * scale)
+
+        title_font = get_font("Jost", title_size, "bold")
+        symbol_font = get_font("Jost", symbol_size, "bold")
+        price_font = get_font("Jost", price_size, "bold")
+        change_font = get_font("Jost", change_size, "bold")
+        detail_font = get_font("Jost", detail_size)
+        footer_font = get_font("Jost", footer_size, "bold")
+
+        # Title
+        if title:
+            tw = get_text_dimensions(draw, title, title_font)[0]
+            draw.text(((width - tw) // 2, y_top), title, font=title_font, fill=text_color)
+            th = int(title_size * 1.15)
+            y_top += th + int(height * 0.02)
+            draw.line((margin, y_top, width - margin, y_top), fill=text_color, width=2)
+            y_top += int(height * 0.01)
+
+        # Footer
+        footer_h = get_text_dimensions(draw, "X", footer_font)[1] + int(height * 0.02)
+        y_bottom = height - margin
+
+        # Grid area
+        grid_gap = int(width * 0.015)
+        grid_area = (margin, y_top, width - margin * 2, y_bottom - footer_h - y_top)
+        cells = calculate_grid(grid_area, rows, columns, grid_gap)
+
+        positive_color = "#006400"
+        negative_color = "#8B0000"
+
+        # Pre-measure line heights for even distribution
+        sym_h = int(symbol_size * 1.15)
+        price_h = int(price_size * 1.15)
+        name_line_h = get_text_dimensions(draw, "X", detail_font)[1]
+        change_line_h = get_text_dimensions(draw, "X", change_font)[1]
+        detail_line_h = get_text_dimensions(draw, "X", detail_font)[1]
+
+        for i, stock in enumerate(stocks):
+            if i >= len(cells):
+                break
+            cx, cy, cw, ch = cells[i]
+            # Card border
+            draw.rectangle((cx, cy, cx + cw, cy + ch), outline=text_color, width=2)
+
+            pad = int(cw * 0.05)
+            ix = cx + pad
+            iw = cw - pad * 2
+
+            # Check if symbol + price fit on one line
+            sym_text = stock["symbol"]
+            sym_w = get_text_dimensions(draw, sym_text, symbol_font)[0]
+            price_w = get_text_dimensions(draw, stock["price_formatted"], price_font)[0]
+            arrow_text = " +" if stock["is_positive"] else " -"
+            stacked = (sym_w + price_w + int(iw * 0.1)) > iw
+
+            # Calculate total content height
+            if stacked:
+                sym_line_h = sym_h + price_h
+            else:
+                sym_line_h = max(sym_h, price_h)
+            total_content_h = sym_line_h + name_line_h + change_line_h + detail_line_h * 3
+
+            # Distribute remaining space evenly
+            inner_h = ch - pad * 2
+            extra = inner_h - total_content_h
+            num_gaps = 5
+            gap = max(2, extra // num_gaps)
+            iy = cy + pad
+
+            # Symbol + Price
+            if stacked:
+                # Symbol on its own line
+                draw.text((ix, iy), sym_text, font=symbol_font, fill=text_color)
+                iy += sym_h
+                # Price on next line
+                draw.text((ix, iy), stock["price_formatted"], font=price_font, fill=text_color)
+                iy += price_h + gap
+            else:
+                # Symbol left, price right on same line
+                draw.text((ix, iy), sym_text, font=symbol_font, fill=text_color)
+                pd_w = get_text_dimensions(draw, stock["price_formatted"], price_font)[0]
+                draw.text((ix + iw - pd_w, iy), stock["price_formatted"], font=price_font, fill=text_color)
+                iy += sym_line_h + gap
+
+            # Company name
+            name = truncate_text(draw, stock["name"], detail_font, iw - 2)
+            draw.text((ix, iy), name, font=detail_font, fill=text_color)
+            iy += name_line_h + gap
+
+            # Change
+            change_text = f"{stock['change_formatted']} ({stock['change_percent_formatted']})"
+            chg_color = positive_color if stock["is_positive"] else negative_color
+            draw.text((ix, iy), change_text, font=change_font, fill=chg_color)
+            iy += change_line_h + gap
+
+            # Details: Vol, H, L
+            for detail in [f"Vol: {stock['volume']}", f"H: {stock['high_formatted']}", f"L: {stock['low_formatted']}"]:
+                draw.text((ix, iy), detail, font=detail_font, fill=text_color)
+                iy += detail_line_h + gap * 2 // 3
+
+        # Footer
+        fy = y_bottom - footer_h
+        draw.line((margin, fy, width - margin, fy), fill=text_color, width=1)
+        fy += int(height * 0.005)
+        refresh_text = f"Refreshes every {auto_refresh_mins} min" if auto_refresh_mins > 0 else "Manual refresh"
+        draw.text((margin, fy), refresh_text, font=footer_font, fill=text_color)
+        updated_text = f"Last Updated: {last_updated}"
+        uw = get_text_dimensions(draw, updated_text, footer_font)[0]
+        draw.text((width - margin - uw, fy), updated_text, font=footer_font, fill=text_color)
+
         return image
 
     def fetch_stock_data(self, tickers):

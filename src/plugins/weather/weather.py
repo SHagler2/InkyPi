@@ -1,5 +1,8 @@
 from plugins.base_plugin.base_plugin import BasePlugin
-from PIL import Image
+from PIL import Image, ImageDraw
+from utils.app_utils import get_font
+from utils.text_utils import get_text_dimensions, truncate_text
+from utils.layout_utils import draw_rounded_rect
 import os
 import logging
 from datetime import datetime, timedelta, timezone, date
@@ -141,11 +144,417 @@ class Weather(BasePlugin):
             last_refresh_time = now.strftime("%Y-%m-%d %I:%M %p")
         template_params["last_refresh_time"] = last_refresh_time
 
-        image = self.render_image(dimensions, "weather.html", "weather.css", template_params)
+        image = self._render_pil(dimensions, template_params, settings)
 
         if not image:
-            raise RuntimeError("Failed to take screenshot, please check logs.")
+            raise RuntimeError("Failed to generate weather image.")
         return image
+
+    def _render_pil(self, dimensions, data, settings):
+        width, height = dimensions
+        bg_color = settings.get("backgroundColor", "#ffffff")
+        text_color = settings.get("textColor", "#000000")
+        is_vertical = height > width
+
+        image = Image.new("RGBA", dimensions, bg_color)
+        draw = ImageDraw.Draw(image)
+
+        margin = int(width * 0.02)
+        show_refresh = settings.get("displayRefreshTime") == "true"
+        show_metrics = settings.get("displayMetrics") == "true"
+        show_graph = settings.get("displayGraph") == "true"
+        show_forecast = settings.get("displayForecast") == "true"
+        forecast_days = int(settings.get("forecastDays", 7))
+        show_moon = settings.get("moonPhase") == "true"
+
+        # Font sizes
+        title_size = int(min(height * 0.04, width * 0.048))
+        date_size = int(min(height * 0.03, width * 0.038))
+        temp_size = int(min(height * 0.12, width * 0.10))
+        label_size = int(min(height * 0.028, width * 0.035))
+        small_size = int(min(height * 0.022, width * 0.025))
+        detail_value_size = int(min(height * 0.06, width * 0.07))
+        forecast_size = int(min(height * 0.032, width * 0.032))
+
+        title_font = get_font("Jost", title_size, "bold")
+        date_font = get_font("Jost", date_size)
+        temp_font = get_font("Jost", temp_size, "bold")
+        label_font = get_font("Jost", label_size)
+        small_font = get_font("Jost", small_size)
+        detail_value_font = get_font("Jost", detail_value_size, "bold")
+        forecast_font = get_font("Jost", forecast_size, "bold")
+        forecast_temp_font = get_font("Jost", int(forecast_size * 0.9), "bold")
+
+        y = margin
+
+        # Last refresh time (top right)
+        if show_refresh:
+            refresh_text = f"Last refresh: {data.get('last_refresh_time', '')}"
+            rw = get_text_dimensions(draw, refresh_text, small_font)[0]
+            draw.text((width - margin - rw, margin // 2), refresh_text, font=small_font, fill=text_color)
+
+        # Header: Title + Date
+        if data.get("title"):
+            tw = get_text_dimensions(draw, data["title"], title_font)[0]
+            draw.text(((width - tw) // 2, y), data["title"], font=title_font, fill=text_color)
+            y += get_text_dimensions(draw, data["title"], title_font)[1] + 2
+
+        date_text = data.get("current_date", "")
+        dw = get_text_dimensions(draw, date_text, date_font)[0]
+        draw.text(((width - dw) // 2, y), date_text, font=date_font, fill=text_color)
+        y += get_text_dimensions(draw, date_text, date_font)[1] + 2
+
+        # === Current conditions section ===
+        current_section_h = int(height * 0.25)
+        current_y = y
+
+        if is_vertical:
+            # Vertical: icon + temp centered, data points below
+            icon_area_w = int(width * 0.4)
+            temp_area_w = width - icon_area_w - margin * 2
+
+            # Weather icon
+            icon_path = data.get("current_day_icon", "")
+            if icon_path and os.path.exists(icon_path):
+                try:
+                    icon_img = Image.open(icon_path).convert("RGBA")
+                    icon_size = min(icon_area_w, current_section_h) - 10
+                    icon_img = icon_img.resize((icon_size, icon_size), Image.LANCZOS)
+                    icon_x = margin + (icon_area_w - icon_size) // 2
+                    icon_y = current_y + (current_section_h - icon_size) // 2
+                    image.paste(icon_img, (icon_x, icon_y), icon_img)
+                except Exception:
+                    pass
+
+            # Temperature + details
+            tx = margin + icon_area_w
+            temp_text = data.get("current_temperature", "--")
+            unit_text = data.get("temperature_unit", "")
+            temp_w, temp_h = get_text_dimensions(draw, temp_text, temp_font)
+            draw.text((tx, current_y), temp_text, font=temp_font, fill=text_color)
+            # Unit superscript
+            unit_font = get_font("Jost", int(temp_size * 0.4), "bold")
+            draw.text((tx + temp_w + 2, current_y + int(temp_size * 0.15)), unit_text, font=unit_font, fill=text_color)
+
+            detail_y = current_y + temp_h + 2
+            feels_text = f"Feels Like {data.get('feels_like', '--')}"
+            if data.get("units") != "standard":
+                feels_text += "\u00B0"
+            draw.text((tx, detail_y), feels_text, font=label_font, fill=text_color)
+            detail_y += get_text_dimensions(draw, feels_text, label_font)[1] + 2
+
+            forecast_list = data.get("forecast", [])
+            if forecast_list:
+                minmax = f"{forecast_list[0].get('high', '--')}\u00B0 / {forecast_list[0].get('low', '--')}\u00B0"
+                draw.text((tx, detail_y), minmax, font=label_font, fill=text_color)
+                detail_y += get_text_dimensions(draw, minmax, label_font)[1] + 2
+
+            desc = data.get("weather_description", "")
+            if desc:
+                draw.text((tx, detail_y), desc, font=label_font, fill=text_color)
+
+            y = current_y + current_section_h
+        else:
+            # Horizontal: icon+temp grouped in left 50%, data points in right 50%
+            half_w = width // 2
+
+            temp_text = data.get("current_temperature", "--")
+            unit_text = data.get("temperature_unit", "")
+            temp_w, temp_h = get_text_dimensions(draw, temp_text, temp_font)
+            unit_font = get_font("Jost", int(temp_size * 0.4), "bold")
+            unit_w = get_text_dimensions(draw, unit_text, unit_font)[0]
+            temp_row_w = temp_w + 4 + unit_w
+
+            # Build detail lines
+            detail_lines = []
+            feels_text = f"Feels Like {data.get('feels_like', '--')}"
+            if data.get("units") != "standard":
+                feels_text += "\u00B0"
+            detail_lines.append(feels_text)
+
+            forecast_list = data.get("forecast", [])
+            if forecast_list:
+                minmax = f"{forecast_list[0].get('high', '--')}\u00B0 / {forecast_list[0].get('low', '--')}\u00B0"
+                detail_lines.append(minmax)
+
+            desc = data.get("weather_description", "")
+            if desc:
+                detail_lines.append(desc)
+
+            detail_line_h = get_text_dimensions(draw, "Xg", label_font)[1]
+            detail_spacing = 2
+
+            # --- Left 50%: Icon + temp/feels as a group, centered ---
+            icon_path = data.get("current_day_icon", "")
+            icon_size = min(int(half_w * 0.38), current_section_h - 10)
+            icon_gap = int(width * 0.02)  # controlled gap between icon and temp
+
+            # Total group width, centered in left half
+            group_w = icon_size + icon_gap + temp_row_w
+            group_x = (half_w - group_w) // 2
+
+            if icon_path and os.path.exists(icon_path):
+                try:
+                    icon_img = Image.open(icon_path).convert("RGBA")
+                    icon_img = icon_img.resize((icon_size, icon_size), Image.LANCZOS)
+                    icon_y = current_y + (current_section_h - icon_size) // 2
+                    image.paste(icon_img, (group_x, icon_y), icon_img)
+                except Exception:
+                    pass
+
+            # Temp + details vertically centered
+            total_detail_h = len(detail_lines) * (detail_line_h + detail_spacing)
+            temp_visual_h = int(temp_size * 1.15)
+            gap = int(height * 0.01)
+            block_h = temp_visual_h + gap + total_detail_h
+            block_y = current_y + (current_section_h - block_h) // 2
+
+            temp_x = group_x + icon_size + icon_gap
+            draw.text((temp_x, block_y), temp_text, font=temp_font, fill=text_color)
+            draw.text((temp_x + temp_w + 4, block_y + int(temp_size * 0.1)), unit_text, font=unit_font, fill=text_color)
+
+            # Detail lines centered under temp
+            detail_y = block_y + temp_visual_h + gap
+            temp_center_x = temp_x + temp_row_w // 2
+            for line in detail_lines:
+                lw = get_text_dimensions(draw, line, label_font)[0]
+                draw.text((temp_center_x - lw // 2, detail_y), line, font=label_font, fill=text_color)
+                detail_y += detail_line_h + detail_spacing
+
+            # --- Right 50%: Data points ---
+            if show_metrics:
+                self._draw_data_points(draw, image, data.get("data_points", []),
+                                       half_w, current_y, half_w, current_section_h,
+                                       label_font, detail_value_font, text_color)
+
+            y = current_y + current_section_h
+
+        # Vertical: data points below current section
+        if is_vertical and show_metrics:
+            dp_h = int(height * 0.12)
+            self._draw_data_points(draw, image, data.get("data_points", []),
+                                   margin, y, width - margin * 2, dp_h,
+                                   label_font, detail_value_font, text_color)
+            y += dp_h + int(height * 0.01)
+
+        # Separator
+        draw.line((margin, y, width - margin, y), fill="#AAAAAA", width=1)
+        y += int(height * 0.01)
+
+        # Calculate forecast height first (content-driven), then graph gets the rest
+        forecast_h = 0
+        if show_forecast:
+            # Estimate forecast tile height from content: day label + icon + temp + moon
+            day_label_h = get_text_dimensions(draw, "Mon", forecast_font)[1]
+            temp_label_h = get_text_dimensions(draw, "77°/57°", forecast_temp_font)[1]
+            n_forecast = min(forecast_days, len(data.get("forecast", [])) - 1)
+            tile_w = (width - margin * 2) // max(n_forecast, 1)
+            icon_sz = min(int(tile_w * 0.70), int(height * 0.12))
+            moon_h = int(tile_w * 0.18) + 12 if show_moon else 0
+            tile_pad = int(tile_w * 0.05)
+            forecast_h = tile_pad + day_label_h + 2 + icon_sz + 2 + temp_label_h + 14 + moon_h + tile_pad
+
+        available_h = height - y - margin - (int(height * 0.01) if show_forecast else 0) - forecast_h
+
+        # === Hourly temperature graph ===
+        if show_graph:
+            graph_h = available_h if show_graph else 0
+            self._draw_hourly_graph(draw, data.get("hourly_forecast", []),
+                                    margin, y, width - margin * 2, graph_h,
+                                    small_font, text_color, data.get("units", "metric"))
+            y += graph_h + int(height * 0.01)
+
+        # === Forecast row ===
+        if show_forecast:
+            forecast_list = data.get("forecast", [])[1:forecast_days + 1]
+            self._draw_forecast(draw, image, forecast_list,
+                                margin, y, width - margin * 2, forecast_h,
+                                forecast_font, forecast_temp_font, small_font,
+                                text_color, data.get("units", "metric"), show_moon)
+
+        return image
+
+    def _draw_data_points(self, draw, image, data_points, x, y, w, h,
+                          label_font, value_font, text_color):
+        """Draw data points in a 2x2 grid matching the Chromium layout:
+        icon on left, label centered above, big value centered below."""
+        if not data_points:
+            return
+        cols = 2
+        rows = (len(data_points) + cols - 1) // cols
+        cell_w = w // cols
+        cell_h = h // rows
+
+        for i, dp in enumerate(data_points):
+            col = i % cols
+            row = i // cols
+            cx = x + col * cell_w
+            cy = y + row * cell_h
+
+            label = dp.get("label", "")
+            measurement = str(dp.get("measurement", ""))
+            unit = dp.get("unit", "")
+            arrow = dp.get("arrow", "")
+            val_text = f"{measurement}{unit} {arrow}".strip()
+
+            label_h = get_text_dimensions(draw, label, label_font)[1]
+            val_h = get_text_dimensions(draw, val_text, value_font)[1]
+
+            # Icon — large, vertically centered in left portion of cell
+            icon_size = min(int(cell_w * 0.33), int(cell_h * 0.60))
+            icon_path = dp.get("icon", "")
+            icon_area_w = icon_size + int(cell_w * 0.02)
+
+            if icon_path and os.path.exists(icon_path):
+                try:
+                    icon = Image.open(icon_path).convert("RGBA")
+                    icon = icon.resize((icon_size, icon_size), Image.LANCZOS)
+                    icon_y = cy + (cell_h - icon_size) // 2
+                    image.paste(icon, (cx, icon_y), icon)
+                except Exception:
+                    pass
+
+            # Text area — to the right of icon, centered vertically and horizontally
+            text_area_x = cx + icon_area_w
+            text_area_w = cell_w - icon_area_w
+            text_block_h = label_h + 2 + val_h
+            text_y = cy + (cell_h - text_block_h) // 2
+
+            # Label centered
+            lw = get_text_dimensions(draw, label, label_font)[0]
+            draw.text((text_area_x + (text_area_w - lw) // 2, text_y),
+                      label, font=label_font, fill=text_color)
+
+            # Value centered below label
+            vw = get_text_dimensions(draw, val_text, value_font)[0]
+            draw.text((text_area_x + (text_area_w - vw) // 2, text_y + label_h + 2),
+                      val_text, font=value_font, fill=text_color)
+
+    def _draw_hourly_graph(self, draw, hourly, x, y, w, h,
+                           font, text_color, units):
+        """Draw a simple temperature line graph."""
+        if not hourly or len(hourly) < 2:
+            return
+
+        temps = [hr["temperature"] for hr in hourly]
+        times = [hr["time"] for hr in hourly]
+        min_temp = min(temps)
+        max_temp = max(temps)
+        temp_range = max_temp - min_temp if max_temp != min_temp else 1
+
+        # Graph area with padding for labels
+        label_h = get_text_dimensions(draw, "12", font)[1]
+        graph_x = x + int(w * 0.06)
+        graph_w = w - int(w * 0.12)
+        graph_y = y + label_h + 4
+        graph_h = h - label_h * 2 - 8
+
+        n = len(temps)
+        points = []
+        for i, temp in enumerate(temps):
+            px = graph_x + int(i / (n - 1) * graph_w)
+            py = graph_y + graph_h - int((temp - min_temp) / temp_range * graph_h)
+            points.append((px, py))
+
+        # Draw line
+        for i in range(len(points) - 1):
+            draw.line([points[i], points[i + 1]], fill="#F17A24", width=2)
+
+        # Draw temperature labels at min/max
+        degree = "\u00B0" if units != "standard" else ""
+        # Y-axis: min and max
+        draw.text((x, graph_y), f"{max_temp}{degree}", font=font, fill=text_color)
+        draw.text((x, graph_y + graph_h - label_h), f"{min_temp}{degree}", font=font, fill=text_color)
+
+        # X-axis time labels (every few hours)
+        step = max(1, n // 6)
+        for i in range(0, n, step):
+            px = graph_x + int(i / (n - 1) * graph_w)
+            tw = get_text_dimensions(draw, times[i], font)[0]
+            draw.text((px - tw // 2, y + h - label_h), times[i], font=font, fill=text_color)
+
+        # Precipitation bars
+        precip_data = [hr.get("precipitation", 0) for hr in hourly]
+        max_precip = max(precip_data) if precip_data else 0
+        if max_precip > 0:
+            bar_w = max(1, graph_w // n - 1)
+            for i, p in enumerate(precip_data):
+                if p > 0.05:
+                    px = graph_x + int(i / (n - 1) * graph_w) - bar_w // 2
+                    bar_h = int(p * graph_h * 0.5)
+                    bar_y = graph_y + graph_h - bar_h
+                    draw.rectangle((px, bar_y, px + bar_w, graph_y + graph_h),
+                                   fill="#1A6FB0", outline="#1A6FB0")
+
+    def _draw_forecast(self, draw, image, forecast, x, y, w, h,
+                       day_font, temp_font, small_font, text_color, units, show_moon):
+        """Draw forecast day columns."""
+        if not forecast:
+            return
+        n = len(forecast)
+        col_w = w // n
+        gap = int(col_w * 0.05)
+        degree = "\u00B0" if units != "standard" else ""
+
+        for i, day in enumerate(forecast):
+            cx = x + i * col_w + gap
+            cw = col_w - gap * 2
+            cy = y
+
+            # Border
+            draw_rounded_rect(draw, (cx, cy, cx + cw, cy + h), int(cw * 0.08),
+                              outline=text_color, width=1)
+
+            pad = int(cw * 0.05)
+            iy = cy + pad
+
+            # Day name
+            day_name = day.get("day", "")
+            dnw = get_text_dimensions(draw, day_name, day_font)[0]
+            draw.text((cx + (cw - dnw) // 2, iy), day_name, font=day_font, fill=text_color)
+            iy += get_text_dimensions(draw, day_name, day_font)[1] + 2
+
+            # Weather icon — fill more of the tile
+            icon_path = day.get("icon", "")
+            icon_size = min(int(cw * 0.70), int(h * 0.45))
+            if icon_path and os.path.exists(icon_path):
+                try:
+                    icon = Image.open(icon_path).convert("RGBA")
+                    icon = icon.resize((icon_size, icon_size), Image.LANCZOS)
+                    image.paste(icon, (cx + (cw - icon_size) // 2, iy), icon)
+                except Exception:
+                    pass
+            iy += icon_size + 2
+
+            # High / Low
+            temp_text = f"{day.get('high', '--')}{degree} / {day.get('low', '--')}{degree}"
+            ttw = get_text_dimensions(draw, temp_text, temp_font)[0]
+            draw.text((cx + (cw - ttw) // 2, iy), temp_text, font=temp_font, fill=text_color)
+            iy += get_text_dimensions(draw, temp_text, temp_font)[1] + int(h * 0.06)
+
+            # Moon phase
+            if show_moon:
+                # Separator
+                draw.line((cx + pad, iy, cx + cw - pad, iy), fill="#AAAAAA", width=1)
+                iy += int(h * 0.04)
+
+                moon_icon_path = day.get("moon_phase_icon", "")
+                moon_size = min(int(cw * 0.2), int(h * 0.1))
+                moon_pct = day.get("moon_phase_pct", "")
+
+                moon_total_w = moon_size + 6 + get_text_dimensions(draw, f"{moon_pct} %", small_font)[0]
+                moon_x = cx + (cw - moon_total_w) // 2
+
+                if moon_icon_path and os.path.exists(moon_icon_path):
+                    try:
+                        moon_img = Image.open(moon_icon_path).convert("RGBA")
+                        moon_img = moon_img.resize((moon_size, moon_size), Image.LANCZOS)
+                        image.paste(moon_img, (moon_x, iy), moon_img)
+                    except Exception:
+                        pass
+
+                draw.text((moon_x + moon_size + 6, iy + 2), f"{moon_pct} %",
+                          font=small_font, fill=text_color)
 
     def parse_weather_data(self, weather_data, aqi_data, tz, units, time_format, lat):
         current = weather_data.get("current")
