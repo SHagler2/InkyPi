@@ -9,6 +9,8 @@ import pytz
 
 logger = logging.getLogger(__name__)
 
+# Available clock face styles. Each entry defines the face name, default colors,
+# and a preview icon shown in the settings UI.
 CLOCK_FACES = [
     {
         "name": "Gradient Clock",
@@ -40,6 +42,13 @@ DEFAULT_TIMEZONE = "US/Eastern"
 DEFAULT_CLOCK_FACE = "Gradient Clock"
 
 class Clock(BasePlugin):
+    """Analog and digital clock plugin with four face styles.
+
+    Face styles: Gradient (conic gradient with analog hands), Digital (DS-Digital
+    font), Divided (two-tone analog), and Word (letter grid that spells out the
+    time in English). All faces support user-configurable primary/secondary colors.
+    """
+
     def generate_settings_template(self):
         template_params = super().generate_settings_template()
         template_params['clock_faces'] = CLOCK_FACES
@@ -76,6 +85,8 @@ class Clock(BasePlugin):
         return img
     
     def draw_digital_clock(self, dimensions, time, primary_color=(255,255,255), secondary_color=(0,0,0)):
+        """Render a digital clock with DS-Digital font. Draws dim "00:00" behind
+        the actual time to simulate unlit LCD segments."""
         w,h = dimensions
         time_str = Clock.format_time(time.hour, time.minute, zero_pad = True)
 
@@ -94,7 +105,8 @@ class Clock(BasePlugin):
 
         return combined
         
-    def draw_conic_clock(self, dimensions, time, primary_color=(219, 50, 70, 255), secondary_color=(0, 0, 0, 255) ):
+    def draw_conic_clock(self, dimensions, time, primary_color=(219, 50, 70, 255), secondary_color=(0, 0, 0, 255)):
+        """Render an analog clock with conic gradient background sweeping between hands."""
         width, height = dimensions
         hour_angle, minute_angle = Clock.calculate_clock_angles(time)
 
@@ -127,6 +139,7 @@ class Clock(BasePlugin):
         return final_image
 
     def draw_divided_clock(self, dimensions, time, primary_color=(32,183,174), secondary_color=(255,255,255)):
+        """Render a two-tone analog clock — top half primary color, bottom half secondary."""
         w,h = dimensions
         bg = Image.new("RGBA", dimensions, primary_color+(255,))
         bg_draw = ImageDraw.Draw(bg)
@@ -163,6 +176,8 @@ class Clock(BasePlugin):
         return combined
 
     def draw_word_clock(self, dimensions, time, primary_color=(0,0,0), secondary_color=(255,255,255)):
+        """Render a word clock — a letter grid where the current time is spelled out
+        with highlighted letters (e.g. 'IT IS HALF PAST SEVEN')."""
         w,h = dimensions
 
         bg = Image.new("RGBA", dimensions, primary_color+(255,))
@@ -398,6 +413,12 @@ class Clock(BasePlugin):
 
     @staticmethod
     def translate_word_grid_positions(hour, minute):
+        """Map a time to highlighted grid positions for the word clock.
+
+        Returns a list of [row, col] pairs indicating which letters in the
+        10x11 grid should be highlighted to spell out the time in English.
+        Handles "past" (minutes 3-32) and "to" (minutes 33-57) forms.
+        """
         letters = [
             [0,0], [0,1], [0,3], [0,4] # IT IS
         ]

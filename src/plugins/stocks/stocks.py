@@ -8,6 +8,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# User-selectable font size multipliers applied to all text in the plugin
 FONT_SIZES = {
     "x-small": 0.6,
     "small": 0.8,
@@ -16,7 +17,9 @@ FONT_SIZES = {
     "x-large": 1.5
 }
 
+# Additional scale factors applied per stock count to prevent text overflow in small cells
 COUNT_SCALES = {1: 1.7, 2: 1.35, 3: 1.2, 4: 1.15, 5: 0.9, 6: 0.85}
+# Grid column counts by number of stocks (max 6)
 GRID_COLUMNS = {1: 1, 2: 2, 3: 3, 4: 2, 5: 3, 6: 3}
 
 
@@ -36,6 +39,13 @@ def format_price(value):
 
 
 class Stocks(BasePlugin):
+    """Stock ticker dashboard plugin using yfinance.
+
+    Displays up to 6 stock tickers in a responsive grid layout. Each card shows
+    the symbol, company name, current price, daily change (colored green/red),
+    volume, and day high/low. Supports configurable font sizes and auto-refresh.
+    """
+
     def generate_settings_template(self):
         template_params = super().generate_settings_template()
         template_params['style_settings'] = True
@@ -88,6 +98,26 @@ class Stocks(BasePlugin):
 
     def _render_pil(self, dimensions, title, stocks, columns, rows,
                     last_updated, auto_refresh_mins, scale, settings):
+        """Render stock cards in a grid layout as a PIL Image.
+
+        Each card contains: symbol, price (stacked or side-by-side depending on
+        width), company name, daily change with color coding, and volume/high/low
+        details. Footer shows refresh interval and last update time.
+
+        Args:
+            dimensions: (width, height) tuple for the output image.
+            title: Header text (e.g. "Stock Prices").
+            stocks: List of stock data dicts from fetch_stock_data().
+            columns: Number of grid columns.
+            rows: Number of grid rows.
+            last_updated: Formatted timestamp string for the footer.
+            auto_refresh_mins: Refresh interval in minutes (0 = manual).
+            scale: Combined font_size * count_scale multiplier.
+            settings: Plugin settings dict (colors, etc.).
+
+        Returns:
+            PIL Image (RGBA) ready for display.
+        """
         width, height = dimensions
         bg_color = settings.get("backgroundColor", "#ffffff")
         text_color = settings.get("textColor", "#000000")

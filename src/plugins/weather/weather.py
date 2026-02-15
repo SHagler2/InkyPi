@@ -64,6 +64,14 @@ OPEN_METEO_UNIT_PARAMS = {
 }
 
 class Weather(BasePlugin):
+    """Weather dashboard plugin supporting OpenWeatherMap (One Call v3) and Open-Meteo.
+
+    Renders current conditions (icon, temperature, feels-like, hi/lo, description),
+    optional metric data points (sunrise/sunset, wind, humidity), an hourly temperature
+    graph with precipitation overlay, and a multi-day forecast row with moon phases.
+    Adapts layout for both horizontal (800x480) and vertical orientations.
+    """
+
     def generate_settings_template(self):
         template_params = super().generate_settings_template()
         template_params['api_key'] = {
@@ -151,6 +159,21 @@ class Weather(BasePlugin):
         return image
 
     def _render_pil(self, dimensions, data, settings):
+        """Render the complete weather dashboard as a PIL Image.
+
+        Layout (horizontal): title/date header, current conditions (icon + temp
+        on left, data points on right), separator, hourly graph, forecast row.
+        Vertical layout stacks sections differently. All sections are toggleable
+        via plugin settings.
+
+        Args:
+            dimensions: (width, height) tuple for the output image.
+            data: Parsed weather dict from parse_weather_data() or parse_open_meteo_data().
+            settings: Plugin settings dict (colors, toggle flags, forecast days, etc.).
+
+        Returns:
+            PIL Image (RGBA) ready for display.
+        """
         width, height = dimensions
         bg_color = settings.get("backgroundColor", "#ffffff")
         text_color = settings.get("textColor", "#000000")
@@ -557,6 +580,12 @@ class Weather(BasePlugin):
                           font=small_font, fill=text_color)
 
     def parse_weather_data(self, weather_data, aqi_data, tz, units, time_format, lat):
+        """Parse OpenWeatherMap One Call v3 response into a normalized template dict.
+
+        Returns a dict with keys: current_date, current_day_icon, current_temperature,
+        feels_like, weather_description, temperature_unit, units, time_format,
+        forecast (list), data_points (list), hourly_forecast (list).
+        """
         current = weather_data.get("current")
         daily_forecast = weather_data.get("daily", [])
         dt = datetime.fromtimestamp(current.get('dt'), tz=timezone.utc).astimezone(tz)
@@ -591,6 +620,7 @@ class Weather(BasePlugin):
         return data
 
     def parse_open_meteo_data(self, weather_data, aqi_data, tz, units, time_format, lat):
+        """Parse Open-Meteo API response into the same normalized template dict as parse_weather_data()."""
         current = weather_data.get("current", {})
         daily = weather_data.get('daily', {})
         dt = datetime.fromisoformat(current.get('time')).astimezone(tz) if current.get('time') else datetime.now(tz)
@@ -621,7 +651,15 @@ class Weather(BasePlugin):
         return data
 
     def map_weather_code_to_icon(self, weather_code, is_day):
+        """Map an Open-Meteo WMO weather code to a local icon filename.
 
+        Args:
+            weather_code: WMO weather interpretation code (0-99).
+            is_day: 1 for daytime, 0 for nighttime (affects clear/cloudy icons).
+
+        Returns:
+            Icon filename stem (e.g. "02d", "01n") matching files in icons/ directory.
+        """
         icon = "01d" # Default to clear day icon
         
         if weather_code in [0]:   # Clear sky
@@ -931,6 +969,10 @@ class Weather(BasePlugin):
         return hourly
 
     def parse_data_points(self, weather, air_quality, tz, units, time_format):
+        """Extract current metric data points (sunrise, sunset, wind, humidity) from OWM data.
+
+        Returns a list of dicts with keys: label, measurement, unit, icon, and optional arrow.
+        """
         data_points = []
         sunrise_epoch = weather.get('current', {}).get("sunrise")
 
@@ -1041,6 +1083,11 @@ class Weather(BasePlugin):
         return data_points
 
     def get_wind_arrow(self, wind_deg: float) -> str:
+        """Convert wind direction in degrees to a Unicode arrow character.
+
+        The arrow points in the direction the wind is blowing *toward* (downwind),
+        so a north wind (0 deg) returns "↓".
+        """
         DIRECTIONS = [
             ("↓", 22.5),    # North (N)
             ("↙", 67.5),    # North-East (NE)

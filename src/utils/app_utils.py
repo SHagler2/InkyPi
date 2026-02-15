@@ -72,6 +72,17 @@ def is_connected():
         return False
 
 def get_font(font_name, font_size=50, font_weight="normal"):
+    """Load a bundled font by family name and weight.
+
+    Args:
+        font_name: Font family name — one of "Jost", "Dogica", "Napoli", "DS-Digital".
+        font_size: Size in points (default 50).
+        font_weight: "normal" or "bold" (default "normal"). Falls back to first
+            available variant if the requested weight doesn't exist.
+
+    Returns:
+        PIL ImageFont.truetype instance, or None if font_name is not recognized.
+    """
     if font_name in FONT_FAMILIES:
         font_variants = FONT_FAMILIES[font_name]
 
