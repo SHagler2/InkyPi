@@ -73,15 +73,15 @@ class ShazamPi(BasePlugin):
 
         # 1. Record audio from USB mic
         self._set_status("recording", f"Recording {recording_duration}s of audio...")
-        raw_audio = self._record_audio(recording_duration)
+        raw_audio, gained_audio = self._record_audio(recording_duration)
 
-        # 2. Detect music via YAMNet
+        # 2. Detect music via YAMNet (uses gain-boosted audio for sensitivity)
         self._set_status("detecting", "Analyzing audio for music...")
         confidence = float(settings.get("musicConfidence", 0.15))
-        is_music, top_class, top_score = self._detect_music(raw_audio, recording_duration, confidence)
+        is_music, top_class, top_score = self._detect_music(gained_audio, recording_duration, confidence)
         self._set_status("detected", f"{top_class} ({top_score:.0%})")
 
-        # 3. If music detected, identify via Shazam
+        # 3. If music detected, identify via Shazam (uses raw audio for clean fingerprint)
         if is_music:
             logger.info("Music detected, identifying via Shazam...")
             self._set_status("identifying", "Music detected! Asking Shazam...")
@@ -162,13 +162,15 @@ class ShazamPi(BasePlugin):
             raw_bytes = wf.readframes(wf.getnframes())
             audio = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
-        # Normalize and apply gain
+        # Return raw audio for Shazam, and gain-boosted version for YAMNet
         max_val = np.max(np.abs(audio))
         if max_val > 0:
-            audio = audio / max_val
-        audio = np.clip(audio * AUDIO_GAIN, -1.0, 1.0)
+            gained = audio / max_val
+        else:
+            gained = audio.copy()
+        gained = np.clip(gained * AUDIO_GAIN, -1.0, 1.0)
 
-        return audio
+        return audio, gained
 
     # ========== Music Detection (YAMNet) ==========
 

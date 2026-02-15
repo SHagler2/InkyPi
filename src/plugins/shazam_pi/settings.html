@@ -1,16 +1,8 @@
 <!-- ShazamPi Live Status - only visible during updates when enabled -->
-<div id="shazamStatus" style="
-    position: fixed; top: 0; left: 0; right: 0; z-index: 999;
-    background: #1a1a2e; color: #e0e0e0;
-    padding: 10px 16px; font-family: monospace;
-    font-size: 14px; display: none; align-items: center; gap: 10px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-">
-    <span id="statusIcon" style="font-size: 18px;">&#9835;</span>
-    <span id="statusText">Ready</span>
+<div id="shazamStatus" class="live-status-card">
+    <span id="statusIcon" class="live-status-icon">&#9835;</span>
+    <span id="statusText" class="live-status-text">Ready</span>
 </div>
-<!-- Spacer for when status bar is visible -->
-<div id="shazamStatusSpacer" style="height: 0;"></div>
 
 <div class="form-group">
     <label for="autoRefresh" class="form-label">Auto-Listen Interval</label>
@@ -197,31 +189,31 @@
         function showStatusBar() {
             if (!document.getElementById('showStatus').checked) return;
             const bar = document.getElementById('shazamStatus');
-            const spacer = document.getElementById('shazamStatusSpacer');
             bar.style.display = 'flex';
-            spacer.style.height = '44px';
         }
 
         function hideStatusBar() {
             const bar = document.getElementById('shazamStatus');
-            const spacer = document.getElementById('shazamStatusSpacer');
             bar.style.display = 'none';
-            spacer.style.height = '0';
+        }
+
+        function setBarStyle(stage) {
+            const bar = document.getElementById('shazamStatus');
+            bar.classList.remove('status-success', 'status-error', 'status-active');
+            if (stage === 'rendering') {
+                bar.classList.add('status-success');
+            } else if (stage === 'unidentified' || stage === 'idle') {
+                bar.classList.add('status-error');
+            } else {
+                bar.classList.add('status-active');
+            }
         }
 
         function updateStatusBar(data) {
             const info = stageLabels[data.stage] || ['&#9835;', data.stage];
             document.getElementById('statusIcon').innerHTML = info[0];
             document.getElementById('statusText').textContent = data.detail || info[1];
-
-            const bar = document.getElementById('shazamStatus');
-            if (data.stage === 'rendering') {
-                bar.style.background = '#1b4332';
-            } else if (data.stage === 'unidentified') {
-                bar.style.background = '#4a1a1a';
-            } else {
-                bar.style.background = '#1a1a2e';
-            }
+            setBarStyle(data.stage);
         }
 
         function pollStatus() {
