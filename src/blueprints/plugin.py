@@ -20,12 +20,14 @@ def plugin_page(plugin_id):
 
     # If editing a loop plugin, get existing settings
     existing_settings = {}
+    existing_refresh_interval = None
     if edit_mode and loop_name:
         loop = loop_manager.get_loop(loop_name)
         if loop:
             plugin_ref = next((ref for ref in loop.plugin_order if ref.plugin_id == plugin_id), None)
             if plugin_ref:
                 existing_settings = plugin_ref.plugin_settings or {}
+                existing_refresh_interval = plugin_ref.refresh_interval_seconds
 
     # Find the plugin by id
     plugin_config = device_config.get_plugin(plugin_id)
@@ -40,6 +42,7 @@ def plugin_page(plugin_id):
             template_params["loops"] = loop_manager.get_loop_names()
             template_params["loop_edit_mode"] = edit_mode
             template_params["loop_name"] = loop_name
+            template_params["loop_refresh_interval"] = existing_refresh_interval
 
             # If in edit mode, use existing settings from the loop
             if edit_mode and existing_settings:

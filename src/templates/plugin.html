@@ -30,6 +30,7 @@
         const styleSettings = {{ style_settings | default(false) | tojson }};
         const loopEditMode = {{ loop_edit_mode | default(false) | tojson }};
         const loopName = {{ loop_name | default('') | tojson }};
+        const loopRefreshInterval = {{ loop_refresh_interval | default(0) | tojson }};
 
         let uploadedFiles = {};
 
@@ -56,7 +57,7 @@
             });
 
             if (action == "add_to_loop"){
-                url = '{{ url_for("loops.add_plugin_to_loop") }}';
+                // Convert form data to JSON for add_plugin_to_loop endpoint
                 const loopFormData = new FormData(scheduleForm);
                 const interval = parseInt(loopFormData.get("refresh_interval"));
                 const unit = loopFormData.get("interval_unit");
@@ -64,9 +65,49 @@
                 if (unit === "minutes") intervalSeconds = interval * 60;
                 else if (unit === "hours") intervalSeconds = interval * 3600;
                 else if (unit === "days") intervalSeconds = interval * 86400;
-                formData.append("loop_name", loopFormData.get("loop_name"));
-                formData.append("refresh_interval_seconds", intervalSeconds);
-                clearFormOnSubmit = true
+
+                const settings = {};
+                formData.forEach((value, key) => {
+                    if (key !== 'plugin_id') {
+                        settings[key] = value;
+                    }
+                });
+
+                try {
+                    const response = await fetch('{{ url_for("loops.add_plugin_to_loop") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            loop_name: loopFormData.get("loop_name"),
+                            plugin_id: '{{ plugin.id }}',
+                            refresh_interval_seconds: intervalSeconds,
+                            plugin_settings: settings
+                        })
+                    });
+                    const result = await response.json();
+                    if (response.ok) {
+                        showResponseModal('success', `Success! ${result.message}`);
+                        closeModal('scheduleModal');
+                        form.reset();
+                        scheduleForm.reset();
+                        uploadedFiles = {};
+                        document.querySelectorAll('input[clear-on-submit]').forEach(input => {
+                            input.value = '';
+                            input.dispatchEvent(new Event('change'));
+                        });
+                        document.querySelectorAll('[delete-on-submit]').forEach(div => {
+                            div.remove();
+                        });
+                    } else {
+                        showResponseModal('failure', `Error! ${result.error}`);
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('An error occurred while processing your request.');
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                }
+                return; // Exit early for add_to_loop
             } else if (action == "save_to_loop") {
                 // Convert form data to JSON for update_plugin_settings endpoint
                 const settings = {};
@@ -76,6 +117,11 @@
                     }
                 });
 
+                // Calculate refresh interval from edit fields
+                const editInterval = parseInt(document.getElementById('editRefreshInterval').value) || 30;
+                const editUnit = parseInt(document.getElementById('editIntervalUnit').value) || 60;
+                const refreshIntervalSeconds = editInterval * editUnit;
+
                 try {
                     const response = await fetch('{{ url_for("loops.update_plugin_settings") }}', {
                         method: 'POST',
@@ -83,7 +129,8 @@
                         body: JSON.stringify({
                             loop_name: loopName,
                             plugin_id: '{{ plugin.id }}',
-                            plugin_settings: settings
+                            plugin_settings: settings,
+                            refresh_interval_seconds: refreshIntervalSeconds
                         })
                     });
                     const result = await response.json();
@@ -404,6 +451,38 @@
 
             <!-- Hidden input to pass plugin id -->
             <input type="hidden" name="plugin_id" value="{{ plugin.id }}">
+
+            {% if loop_edit_mode %}
+            <div class="form-group">
+                <label class="form-label">Refresh Interval:</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="number" id="editRefreshInterval" min="1" value="30" class="form-input" style="flex: 1;">
+                    <select id="editIntervalUnit" class="form-input" style="flex: 0 0 120px;">
+                        <option value="60">Minutes</option>
+                        <option value="3600">Hours</option>
+                        <option value="86400">Days</option>
+                    </select>
+                </div>
+                <small style="color: var(--text-secondary);">How often to refresh this plugin's data</small>
+            </div>
+            <script>
+                document.addEventListener('DOMContentLoaded', () => {
+                    const totalSeconds = loopRefreshInterval || 1800;
+                    const intervalInput = document.getElementById('editRefreshInterval');
+                    const unitSelect = document.getElementById('editIntervalUnit');
+                    if (totalSeconds >= 86400 && totalSeconds % 86400 === 0) {
+                        unitSelect.value = '86400';
+                        intervalInput.value = totalSeconds / 86400;
+                    } else if (totalSeconds >= 3600 && totalSeconds % 3600 === 0) {
+                        unitSelect.value = '3600';
+                        intervalInput.value = totalSeconds / 3600;
+                    } else {
+                        unitSelect.value = '60';
+                        intervalInput.value = Math.max(1, Math.round(totalSeconds / 60));
+                    }
+                });
+            </script>
+            {% endif %}
 
             <div class="buttons-container">
                 {% if loop_edit_mode %}
