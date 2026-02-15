@@ -49,6 +49,7 @@ def save_settings():
             "orientation": form_data.get("orientation"),
             "inverted_image": form_data.get("invertImage"),
             "log_system_stats": form_data.get("logSystemStats"),
+            "show_plugin_icon": form_data.get("showPluginIcon"),
             "timezone": form_data.get("timezoneName"),
             "time_format": form_data.get("timeFormat"),
             "image_settings": {

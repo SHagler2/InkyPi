@@ -15,8 +15,10 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-GLOBAL_STATUS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "images", "plugins")
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+GLOBAL_STATUS_DIR = os.path.join(SRC_DIR, "static", "images", "plugins")
 GLOBAL_STATUS_FILE = os.path.join(GLOBAL_STATUS_DIR, "refresh_status.json")
+PLUGINS_DIR = os.path.join(SRC_DIR, "plugins")
 
 class RefreshTask:
     """Handles the logic for refreshing the display using a background thread."""
@@ -240,6 +242,10 @@ class RefreshTask:
                         self._set_global_status("generating", f"Generating {plugin_name}...", plugin_name, plugin_id)
                         image = refresh_action.execute(plugin, self.device_config, current_dt)
 
+                        # Add plugin icon overlay if enabled
+                        if self.device_config.get_config("show_plugin_icon", default=False):
+                            image = self._add_plugin_icon_overlay(image, plugin_id)
+
                         self._set_global_status("processing", f"Processing {plugin_name}...", plugin_name, plugin_id)
                         image_hash = compute_image_hash(image)
 
@@ -394,6 +400,53 @@ class RefreshTask:
             os.rename(tmp_path, GLOBAL_STATUS_FILE)
         except Exception:
             pass  # Non-critical
+
+    def _add_plugin_icon_overlay(self, image, plugin_id):
+        """Add a small plugin icon with dark backing circle in the bottom-right corner."""
+        try:
+            from PIL import ImageDraw
+
+            icon_path = os.path.join(PLUGINS_DIR, plugin_id, "icon.png")
+            if not os.path.exists(icon_path):
+                return image
+
+            icon = Image.open(icon_path).convert("RGBA")
+
+            # Scale icon to ~5% of image height
+            img_w, img_h = image.size
+            icon_size = max(28, int(img_h * 0.05))
+            icon = icon.resize((icon_size, icon_size), Image.LANCZOS)
+
+            # Create backing circle (slightly larger than icon)
+            circle_padding = max(4, int(icon_size * 0.2))
+            circle_size = icon_size + circle_padding * 2
+            circle = Image.new("RGBA", (circle_size, circle_size), (0, 0, 0, 0))
+            circle_draw = ImageDraw.Draw(circle)
+            circle_draw.ellipse([0, 0, circle_size - 1, circle_size - 1], fill=(0, 0, 0, 140))
+
+            # Convert icon to white silhouette (preserve alpha, make RGB white)
+            r, g, b, a = icon.split()
+            white = Image.new("L", icon.size, 255)
+            icon = Image.merge("RGBA", (white, white, white, a))
+
+            # Paste icon centered on circle
+            circle.paste(icon, (circle_padding, circle_padding), icon)
+
+            # Position in bottom-right with padding
+            padding = max(6, int(img_h * 0.01))
+            x = img_w - circle_size - padding
+            y = img_h - circle_size - padding
+
+            # Paste onto image
+            img = image.copy()
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+            img.paste(circle, (x, y), circle)
+
+            return img
+        except Exception as e:
+            logger.debug(f"Could not add plugin icon overlay: {e}")
+            return image
 
     def _get_auto_refresh_seconds(self):
         """Check if the currently displayed plugin has auto-refresh configured.
