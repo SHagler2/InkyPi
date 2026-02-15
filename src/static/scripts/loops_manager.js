@@ -515,14 +515,12 @@ window.addEventListener('DOMContentLoaded', () => {
         sessionStorage.removeItem('storedMessage');
     }
 
-    // Add click handlers for edit plugin buttons
+    // Edit plugin buttons navigate to full settings page
     document.querySelectorAll('.edit-plugin-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const loopName = this.dataset.loopName;
             const pluginId = this.dataset.pluginId;
-            const refreshInterval = parseInt(this.dataset.refreshInterval);
-            const pluginSettings = JSON.parse(this.dataset.pluginSettings);
-            openEditPluginModal(loopName, pluginId, refreshInterval, pluginSettings);
+            window.location.href = `/plugin/${pluginId}?loop_name=${encodeURIComponent(loopName)}&edit_mode=true`;
         });
     });
 

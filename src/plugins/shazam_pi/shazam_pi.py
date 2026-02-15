@@ -27,7 +27,7 @@ DEFAULT_IMAGE_PATH = os.path.join(PLUGIN_DIR, "resources", "default.jpg")
 
 RAW_SAMPLE_RATE = 44100
 DOWN_SAMPLE_RATE = 16000
-AUDIO_GAIN = 5.0
+AUDIO_GAIN = 10.0
 WEATHER_CACHE_MINUTES = 30
 STATUS_FILE = os.path.join(PLUGIN_DIR, "status.json")
 
@@ -128,14 +128,27 @@ class ShazamPi(BasePlugin):
         else:
             logger.warning("USB mic not found, using default audio device")
 
-        # Record directly at 16kHz to avoid expensive resampling
-        audio = sd.rec(
-            int(recording_duration * DOWN_SAMPLE_RATE),
-            samplerate=DOWN_SAMPLE_RATE,
-            channels=1,
-            dtype=np.float32
-        )
-        sd.wait()
+        # Try recording at 16kHz first (faster), fall back to native rate + downsample
+        try:
+            audio = sd.rec(
+                int(recording_duration * DOWN_SAMPLE_RATE),
+                samplerate=DOWN_SAMPLE_RATE,
+                channels=1,
+                dtype=np.float32
+            )
+            sd.wait()
+        except sd.PortAudioError:
+            logger.info(f"Mic doesn't support {DOWN_SAMPLE_RATE}Hz, recording at {RAW_SAMPLE_RATE}Hz and downsampling")
+            from scipy.signal import resample
+            audio = sd.rec(
+                int(recording_duration * RAW_SAMPLE_RATE),
+                samplerate=RAW_SAMPLE_RATE,
+                channels=1,
+                dtype=np.float32
+            )
+            sd.wait()
+            num_samples = int(len(audio) * DOWN_SAMPLE_RATE / RAW_SAMPLE_RATE)
+            audio = resample(audio, num_samples)
 
         # Normalize and apply gain
         max_val = np.max(np.abs(audio))

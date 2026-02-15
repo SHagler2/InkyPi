@@ -7,9 +7,65 @@
     </select>
 </div>
 
+<!-- Prompt Source Selection -->
 <div class="form-group">
-    <label for="textPrompt" class="form-label">Text Prompt:</label>
-    <input type="text" id="textPrompt" name="textPrompt" placeholder="Type something..." required class="form-input">
+    <label for="promptSource" class="form-label">Prompt Source:</label>
+    <select id="promptSource" name="promptSource" class="form-input" onchange="togglePromptSource()">
+        <option value="manual">Manual</option>
+        <option value="news">News Headlines</option>
+    </select>
+</div>
+
+<!-- Manual Prompt Options -->
+<div id="manualPromptOptions">
+    <div class="form-group">
+        <label for="textPrompt" class="form-label">Text Prompt:</label>
+        <input type="text" id="textPrompt" name="textPrompt" placeholder="Type something..." class="form-input">
+    </div>
+
+    <div class="form-group">
+        <label for="randomizePrompt" class="form-label">Randomize Text Prompt:</label>
+        <div class="toggle-container">
+            <input type="checkbox" id="randomizePrompt" name="randomizePrompt" class="toggle-checkbox" value="false" onclick="this.value=this.checked ? 'true' : 'false';">
+            <label for="randomizePrompt" class="toggle-label"></label>
+        </div>
+    </div>
+</div>
+
+<!-- News Headlines Options -->
+<div id="newsOptions" style="display: none;">
+    <div class="form-group">
+        <label class="form-label">News Feeds:</label>
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+                <input type="checkbox" class="news-feed-checkbox" value="bbc"> BBC World News
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+                <input type="checkbox" class="news-feed-checkbox" value="reuters"> Reuters Top News
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+                <input type="checkbox" class="news-feed-checkbox" value="ap"> AP Top News
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+                <input type="checkbox" class="news-feed-checkbox" value="npr"> NPR News
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+                <input type="checkbox" class="news-feed-checkbox" value="nyt"> NY Times Headlines
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+                <input type="checkbox" class="news-feed-checkbox" value="tech"> Ars Technica
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+                <input type="checkbox" class="news-feed-checkbox" value="verge"> The Verge
+            </label>
+        </div>
+        <input type="hidden" id="newsFeeds" name="newsFeeds" value="">
+    </div>
+
+    <div class="form-group">
+        <label for="customFeedUrl" class="form-label">Custom RSS Feed URL:</label>
+        <input type="text" id="customFeedUrl" name="customFeedUrl" placeholder="https://example.com/rss.xml" class="form-input">
+    </div>
 </div>
 
 <!-- OpenAI Options -->
@@ -45,14 +101,6 @@
 </div>
 
 <div class="form-group">
-    <label for="randomizePrompt" class="form-label">Randomize Text Prompt:</label>
-    <div class="toggle-container">
-        <input type="checkbox" id="randomizePrompt" name="randomizePrompt" class="toggle-checkbox" value="false" onclick="this.value=this.checked ? 'true' : 'false';">
-        <label for="randomizePrompt" class="toggle-label"></label>
-    </div>
-</div>
-
-<div class="form-group">
     <label for="showTitle" class="form-label">Show Prompt Title:</label>
     <div class="toggle-container">
         <input type="checkbox" id="showTitle" name="showTitle" class="toggle-checkbox" value="true" checked onclick="this.value=this.checked ? 'true' : 'false';">
@@ -83,6 +131,34 @@
             geminiOptions.style.display = "none";
         }
     }
+
+    function togglePromptSource() {
+        const source = document.getElementById("promptSource").value;
+        const manualOptions = document.getElementById("manualPromptOptions");
+        const newsOptions = document.getElementById("newsOptions");
+
+        if (source === "news") {
+            manualOptions.style.display = "none";
+            newsOptions.style.display = "block";
+        } else {
+            manualOptions.style.display = "block";
+            newsOptions.style.display = "none";
+        }
+    }
+
+    function updateNewsFeedsValue() {
+        const checkboxes = document.querySelectorAll('.news-feed-checkbox');
+        const selected = [];
+        checkboxes.forEach(cb => {
+            if (cb.checked) selected.push(cb.value);
+        });
+        document.getElementById('newsFeeds').value = selected.join(',');
+    }
+
+    // Attach change listeners to news feed checkboxes
+    document.querySelectorAll('.news-feed-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateNewsFeedsValue);
+    });
 
     function toggleQualityDropdown(quality = "") {
         const imageModelDropdown = document.getElementById("imageModel");
@@ -119,6 +195,7 @@
         var geminiImageModel = 'imagen-4.0-generate-001';
         var showTitle = true;
         var fitMode = 'fit';
+        var promptSource = 'manual';
 
         if (loadPluginSettings) {
             document.getElementById('textPrompt').value = pluginSettings.textPrompt || '';
@@ -130,15 +207,27 @@
             geminiImageModel = pluginSettings.geminiImageModel || 'imagen-4.0-generate-001';
             showTitle = pluginSettings.showTitle !== 'false';
             fitMode = pluginSettings.fitMode || 'fit';
+            promptSource = pluginSettings.promptSource || 'manual';
+
+            // Restore news feed selections
+            var savedFeeds = (pluginSettings.newsFeeds || '').split(',');
+            document.querySelectorAll('.news-feed-checkbox').forEach(cb => {
+                cb.checked = savedFeeds.includes(cb.value);
+            });
+            updateNewsFeedsValue();
+
+            document.getElementById('customFeedUrl').value = pluginSettings.customFeedUrl || '';
         }
 
         document.getElementById('provider').value = provider;
+        document.getElementById('promptSource').value = promptSource;
         document.getElementById('imageModel').value = imageModel;
         document.getElementById('geminiImageModel').value = geminiImageModel;
         document.getElementById('showTitle').checked = showTitle;
         document.getElementById('showTitle').value = showTitle ? 'true' : 'false';
         document.getElementById('fitMode').value = fitMode;
         toggleProviderOptions();
+        togglePromptSource();
         toggleQualityDropdown(quality);
     });
 </script>

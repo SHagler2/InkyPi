@@ -3,10 +3,24 @@ from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import base64
+import random
+import html
+import feedparser
 from utils.http_client import get_http_session
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Preset RSS news feeds
+NEWS_FEEDS = {
+    "bbc": ("BBC World News", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+    "reuters": ("Reuters Top News", "https://www.rss-bridge.org/bridge01/?action=display&bridge=Reuters&feed=home%2Ftopnews&format=Atom"),
+    "ap": ("AP Top News", "https://rsshub.app/apnews/topics/apf-topnews"),
+    "npr": ("NPR News", "https://feeds.npr.org/1001/rss.xml"),
+    "nyt": ("NY Times Headlines", "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"),
+    "tech": ("Ars Technica", "https://feeds.arstechnica.com/arstechnica/index"),
+    "verge": ("The Verge", "https://www.theverge.com/rss/index.xml"),
+}
 
 # OpenAI models
 OPENAI_IMAGE_MODELS = ["dall-e-3", "dall-e-2", "gpt-image-1"]
@@ -34,19 +48,31 @@ class AIImage(BasePlugin):
         provider = settings.get("provider", "openai")
         text_prompt = settings.get("textPrompt", "")
         randomize_prompt = settings.get('randomizePrompt') == 'true'
+        prompt_source = settings.get("promptSource", "manual")
         orientation = device_config.get_config("orientation")
 
-        logger.info(f"Provider: {provider}, orientation: {orientation}")
+        logger.info(f"Provider: {provider}, orientation: {orientation}, promptSource: {prompt_source}")
+
+        # If news headlines mode, fetch a headline and use it as the prompt
+        original_headline = None
+        if prompt_source == "news":
+            feed_urls = self._get_selected_feed_urls(settings)
+            original_headline = self._fetch_news_headline(feed_urls)
+            text_prompt = original_headline
+            randomize_prompt = True  # Always randomize for news headlines
+            logger.info(f"News headline selected: '{original_headline}'")
+
         logger.debug(f"Original prompt: '{text_prompt}'")
         logger.debug(f"Randomize prompt: {randomize_prompt}")
 
         image = None
         final_prompt = text_prompt  # Track the actual prompt used
 
+        is_news = prompt_source == "news"
         if provider == "gemini":
-            image, final_prompt = self._generate_with_gemini(settings, device_config, text_prompt, randomize_prompt, orientation)
+            image, final_prompt = self._generate_with_gemini(settings, device_config, text_prompt, randomize_prompt, orientation, is_news)
         else:
-            image, final_prompt = self._generate_with_openai(settings, device_config, text_prompt, randomize_prompt, orientation)
+            image, final_prompt = self._generate_with_openai(settings, device_config, text_prompt, randomize_prompt, orientation, is_news)
 
         if image:
             logger.info(f"AI image generated successfully: {image.size[0]}x{image.size[1]}")
@@ -62,10 +88,11 @@ class AIImage(BasePlugin):
 
             image = self.image_loader.resize_image(image, dimensions, fit_mode=fit_mode)
 
-            # Add title overlay using the final prompt
+            # Add title overlay — use original headline for news, final prompt otherwise
             show_title = settings.get("showTitle", "true") != "false"
-            if show_title and final_prompt:
-                title = final_prompt.strip()
+            title = original_headline if original_headline else final_prompt
+            if show_title and title:
+                title = title.strip()
                 image = self._add_title_overlay(image, title)
                 logger.info(f"Added title overlay: {title}")
 
@@ -131,7 +158,50 @@ class AIImage(BasePlugin):
 
         return img_with_overlay
 
-    def _generate_with_openai(self, settings, device_config, text_prompt, randomize_prompt, orientation):
+    def _get_selected_feed_urls(self, settings):
+        """Build list of feed URLs from selected presets and custom URL."""
+        feed_urls = []
+        selected_feeds = settings.get("newsFeeds", "")
+        if selected_feeds:
+            for key in selected_feeds.split(","):
+                key = key.strip()
+                if key in NEWS_FEEDS:
+                    feed_urls.append(NEWS_FEEDS[key][1])
+        custom_url = settings.get("customFeedUrl", "").strip()
+        if custom_url:
+            feed_urls.append(custom_url)
+        if not feed_urls:
+            # Default to BBC if nothing selected
+            feed_urls.append(NEWS_FEEDS["bbc"][1])
+            logger.warning("No news feeds selected, defaulting to BBC")
+        return feed_urls
+
+    def _fetch_news_headline(self, feed_urls):
+        """Fetch headlines from RSS feeds and return a random one."""
+        session = get_http_session()
+        all_headlines = []
+
+        for url in feed_urls:
+            try:
+                resp = session.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+                resp.raise_for_status()
+                feed = feedparser.parse(resp.content)
+                for entry in feed.entries:
+                    title = entry.get("title", "").strip()
+                    if title:
+                        all_headlines.append(html.unescape(title))
+            except Exception as e:
+                logger.warning(f"Failed to fetch RSS feed {url}: {e}")
+                continue
+
+        if not all_headlines:
+            raise RuntimeError("Could not fetch any news headlines. Check feed URLs and network connectivity.")
+
+        headline = random.choice(all_headlines)
+        logger.info(f"Selected headline from {len(all_headlines)} total: '{headline}'")
+        return headline
+
+    def _generate_with_openai(self, settings, device_config, text_prompt, randomize_prompt, orientation, is_news=False):
         """Generate image using OpenAI DALL-E."""
         api_key = device_config.load_env_key("OPEN_AI_SECRET")
         if not api_key:
@@ -155,7 +225,7 @@ class AIImage(BasePlugin):
 
             if randomize_prompt:
                 logger.debug("Generating randomized prompt using GPT-4...")
-                text_prompt = self._fetch_openai_prompt(ai_client, text_prompt)
+                text_prompt = self._fetch_openai_prompt(ai_client, text_prompt, is_news)
                 text_prompt = text_prompt.encode('ascii', errors='ignore').decode('ascii')
                 logger.info(f"Randomized prompt: '{text_prompt}'")
 
@@ -167,7 +237,7 @@ class AIImage(BasePlugin):
             logger.error(f"Failed to make OpenAI request: {str(e)}")
             raise RuntimeError("OpenAI request failure, please check logs.")
 
-    def _generate_with_gemini(self, settings, device_config, text_prompt, randomize_prompt, orientation):
+    def _generate_with_gemini(self, settings, device_config, text_prompt, randomize_prompt, orientation, is_news=False):
         """Generate image using Google Gemini Imagen."""
         api_key = device_config.load_env_key("GOOGLE_GEMINI_SECRET")
         if not api_key:
@@ -188,7 +258,7 @@ class AIImage(BasePlugin):
 
             if randomize_prompt:
                 logger.debug("Generating randomized prompt using Gemini...")
-                text_prompt = self._fetch_gemini_prompt(client, text_prompt)
+                text_prompt = self._fetch_gemini_prompt(client, text_prompt, is_news)
                 logger.info(f"Randomized prompt: '{text_prompt}'")
 
             # Add style hints for e-ink display
@@ -282,7 +352,7 @@ class AIImage(BasePlugin):
             img = Image.open(BytesIO(image_bytes))
         return img
 
-    def _fetch_openai_prompt(self, ai_client, from_prompt=None):
+    def _fetch_openai_prompt(self, ai_client, from_prompt=None, is_news=False):
         """Generate a creative prompt using OpenAI."""
         logger.info("Getting random image prompt from OpenAI...")
 
@@ -298,7 +368,19 @@ class AIImage(BasePlugin):
             "Give me a completely random image prompt, something unexpected and creative! "
             "Let's see what your AI mind can cook up!"
         )
-        if from_prompt and from_prompt.strip():
+        if from_prompt and from_prompt.strip() and is_news:
+            system_content = (
+                "You are a creative editorial illustrator. Given a news headline, generate "
+                "a vivid image prompt that illustrates the story. Think bold editorial "
+                "illustration style — dramatic, evocative, symbolic imagery. Keep it 20 words "
+                "or less. Do not include any text or words in the image. Just provide the "
+                "prompt, no explanation."
+            )
+            user_content = (
+                f"News headline: \"{from_prompt}\"\n"
+                "Create a vivid editorial illustration prompt for this headline."
+            )
+        elif from_prompt and from_prompt.strip():
             system_content = (
                 "You are a creative assistant specializing in generating highly descriptive "
                 "and unique prompts for creating images. When given a short or simple image "
@@ -332,11 +414,19 @@ class AIImage(BasePlugin):
         logger.info(f"Generated random image prompt: {prompt}")
         return prompt
 
-    def _fetch_gemini_prompt(self, client, from_prompt=None):
+    def _fetch_gemini_prompt(self, client, from_prompt=None, is_news=False):
         """Generate a creative prompt using Gemini."""
         logger.info("Getting random image prompt from Gemini...")
 
-        if from_prompt and from_prompt.strip():
+        if from_prompt and from_prompt.strip() and is_news:
+            prompt_request = (
+                f"News headline: \"{from_prompt}\"\n"
+                "Create a vivid editorial illustration prompt for this headline. "
+                "Think bold, dramatic, evocative, symbolic imagery in editorial illustration style. "
+                "Do not include any text or words in the image. Keep it 20 words or less. "
+                "Just provide the prompt, no explanation."
+            )
+        elif from_prompt and from_prompt.strip():
             prompt_request = (
                 f"Take this image description: \"{from_prompt}\"\n"
                 "Rewrite it to make it more detailed, imaginative, and unique while staying "

@@ -88,7 +88,9 @@
                     });
                     const result = await response.json();
                     if (response.ok) {
-                        showResponseModal('success', `Success! Settings saved to loop "${loopName}"`);
+                        // Store success message and redirect back to loops page
+                        sessionStorage.setItem('storedMessage', JSON.stringify({ type: 'success', text: `Settings saved to loop "${loopName}"` }));
+                        window.location.href = '/loops';
                     } else {
                         showResponseModal('failure', `Error! ${result.error}`);
                     }
@@ -294,7 +296,7 @@
 <body>
     <div class="frame">
         <!-- Back Button -->
-        <button onclick="history.back()" class="back-button">← Back</button>
+        <button onclick="{% if loop_edit_mode %}window.location.href='/loops'{% else %}history.back(){% endif %}" class="back-button">← Back</button>
 
         <!-- Plugin Title and Icon -->
         <div class="app-header">
