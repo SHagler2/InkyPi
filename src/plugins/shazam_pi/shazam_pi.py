@@ -27,7 +27,7 @@ DEFAULT_IMAGE_PATH = os.path.join(PLUGIN_DIR, "resources", "default.jpg")
 
 RAW_SAMPLE_RATE = 44100
 DOWN_SAMPLE_RATE = 16000
-AUDIO_GAIN = 10.0
+AUDIO_GAIN = 20.0
 WEATHER_CACHE_MINUTES = 30
 STATUS_FILE = os.path.join(PLUGIN_DIR, "status.json")
 
@@ -107,48 +107,60 @@ class ShazamPi(BasePlugin):
 
     # ========== Audio Recording ==========
 
-    def _find_usb_mic(self):
-        import sounddevice as sd
-        devices = sd.query_devices()
-        for idx, device in enumerate(devices):
-            if 'USB' in device['name']:
-                return idx
+    def _find_usb_mic_alsa(self):
+        """Find USB mic ALSA card number from /proc/asound/cards."""
+        try:
+            with open("/proc/asound/cards") as f:
+                for line in f:
+                    if "USB" in line:
+                        card_num = line.strip().split()[0]
+                        return int(card_num)
+        except Exception as e:
+            logger.warning(f"Could not read ALSA cards: {e}")
         return None
 
     def _record_audio(self, recording_duration):
-        import sounddevice as sd
+        import subprocess
         import numpy as np
+        import wave
 
         logger.info(f"Recording {recording_duration}s of audio...")
 
-        device_idx = self._find_usb_mic()
-        if device_idx is not None:
-            sd.default.device = (device_idx, None)
-            logger.debug(f"Using USB mic at device index {device_idx}")
+        # Find USB mic ALSA card and use plughw for automatic sample rate conversion
+        card = self._find_usb_mic_alsa()
+        if card is not None:
+            device = f"plughw:{card},0"
+            logger.debug(f"Using ALSA device {device}")
+            # Disable AGC and set capture volume to max for consistent levels
+            try:
+                subprocess.run(["amixer", "-c", str(card), "cset", "numid=4", "off"],
+                               capture_output=True, timeout=5)
+                subprocess.run(["amixer", "-c", str(card), "cset", "numid=3", "16"],
+                               capture_output=True, timeout=5)
+            except Exception as e:
+                logger.warning(f"Could not configure mic settings: {e}")
         else:
-            logger.warning("USB mic not found, using default audio device")
+            device = "plughw:1,0"
+            logger.warning("USB mic not found in ALSA cards, defaulting to plughw:1,0")
 
-        # Try recording at 16kHz first (faster), fall back to native rate + downsample
+        tmp_wav = "/tmp/shazam_recording.wav"
+
         try:
-            audio = sd.rec(
-                int(recording_duration * DOWN_SAMPLE_RATE),
-                samplerate=DOWN_SAMPLE_RATE,
-                channels=1,
-                dtype=np.float32
+            subprocess.run(
+                ["arecord", "-D", device, "-f", "S16_LE",
+                 "-r", str(DOWN_SAMPLE_RATE), "-c", "1",
+                 "-d", str(recording_duration), tmp_wav],
+                check=True, capture_output=True, timeout=recording_duration + 5
             )
-            sd.wait()
-        except sd.PortAudioError:
-            logger.info(f"Mic doesn't support {DOWN_SAMPLE_RATE}Hz, recording at {RAW_SAMPLE_RATE}Hz and downsampling")
-            from scipy.signal import resample
-            audio = sd.rec(
-                int(recording_duration * RAW_SAMPLE_RATE),
-                samplerate=RAW_SAMPLE_RATE,
-                channels=1,
-                dtype=np.float32
-            )
-            sd.wait()
-            num_samples = int(len(audio) * DOWN_SAMPLE_RATE / RAW_SAMPLE_RATE)
-            audio = resample(audio, num_samples)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Audio recording timed out")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"arecord failed: {e.stderr.decode().strip()}")
+
+        # Read wav file into numpy array
+        with wave.open(tmp_wav, 'rb') as wf:
+            raw_bytes = wf.readframes(wf.getnframes())
+            audio = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
         # Normalize and apply gain
         max_val = np.max(np.abs(audio))
@@ -156,7 +168,7 @@ class ShazamPi(BasePlugin):
             audio = audio / max_val
         audio = np.clip(audio * AUDIO_GAIN, -1.0, 1.0)
 
-        return np.squeeze(audio)
+        return audio
 
     # ========== Music Detection (YAMNet) ==========
 
