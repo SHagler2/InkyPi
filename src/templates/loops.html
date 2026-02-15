@@ -107,7 +107,7 @@
                             </div>
                             <div style="flex: 1;">
                                 <div style="font-weight: 600; font-size: 15px; color: var(--text-primary); margin-bottom: 4px;">{{ plugins.get(plugin_ref.plugin_id, {}).get('display_name', plugin_ref.plugin_id) }}</div>
-                                <div style="font-size: 13px; color: var(--text-secondary); font-weight: 400;">Refreshes every {{ (plugin_ref.refresh_interval_seconds / 60) | int }} min</div>
+                                <div style="font-size: 13px; color: var(--text-secondary); font-weight: 400;">Refreshes every {% if plugin_ref.refresh_interval_seconds < 60 %}{{ plugin_ref.refresh_interval_seconds | int }}s{% else %}{{ (plugin_ref.refresh_interval_seconds / 60) | int }} min{% endif %}</div>
                             </div>
                             <button type="button"
                                     onclick="refreshPluginNow('{{ loop_item.name }}', '{{ plugin_ref.plugin_id }}')"
@@ -196,7 +196,8 @@
                     <div style="display: flex; gap: 10px;">
                         <input type="number" id="refreshInterval" value="30" min="1" required style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
                         <select id="refreshUnit" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-                            <option value="60">Minutes</option>
+                            <option value="1">Seconds</option>
+                            <option value="60" selected>Minutes</option>
                             <option value="3600">Hours</option>
                             <option value="86400">Days</option>
                         </select>
@@ -234,6 +235,7 @@
                     <div style="display: flex; gap: 10px;">
                         <input type="number" id="editRefreshInterval" min="1" required style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
                         <select id="editRefreshUnit" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            <option value="1">Seconds</option>
                             <option value="60">Minutes</option>
                             <option value="3600">Hours</option>
                             <option value="86400">Days</option>

@@ -50,9 +50,12 @@ function openEditPluginModal(loopName, pluginId, refreshIntervalSeconds, pluginS
     } else if (refreshIntervalSeconds >= 3600 && refreshIntervalSeconds % 3600 === 0) {
         interval = refreshIntervalSeconds / 3600;
         unit = 3600;
-    } else {
+    } else if (refreshIntervalSeconds >= 60 && refreshIntervalSeconds % 60 === 0) {
         interval = refreshIntervalSeconds / 60;
         unit = 60;
+    } else {
+        interval = refreshIntervalSeconds;
+        unit = 1;
     }
 
     document.getElementById('editRefreshInterval').value = interval;

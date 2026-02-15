@@ -270,8 +270,8 @@ class RefreshTask:
                                 if ref.refresh_interval_seconds and ref.refresh_interval_seconds < loop_manager.rotation_interval_seconds:
                                     interval_minutes = ref.refresh_interval_seconds / 60
                                     if interval_minutes > 0:
-                                        plugin_settings['autoRefresh'] = str(int(interval_minutes))
-                                        logger.info(f"Deriving autoRefresh={int(interval_minutes)}min from loop refresh_interval for {ref.plugin_id}")
+                                        plugin_settings['autoRefresh'] = str(interval_minutes)
+                                        logger.info(f"Deriving autoRefresh={interval_minutes}min from loop refresh_interval for {ref.plugin_id}")
                         self._update_auto_refresh_tracking(plugin_settings, current_dt)
 
                         # Batch config writes to reduce SD card wear
