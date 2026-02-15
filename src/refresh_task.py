@@ -62,6 +62,9 @@ class RefreshTask:
         else:
             self.last_loop_rotation_time = None
 
+        # First run after boot uses a short delay so the display updates quickly
+        self.first_run = True
+
         # If no auto-refresh tracking but current plugin is stocks, restore from saved settings
         if not self.auto_refresh_plugin_settings:
             refresh_info = device_config.get_refresh_info()
@@ -143,6 +146,11 @@ class RefreshTask:
                             use_auto_refresh = True  # Still want auto-refresh, but loop interval is shorter
                             logger.info(f"Auto-refresh configured: {auto_refresh_seconds}s, but loop interval {sleep_time}s is shorter")
 
+                    # On first run after boot, use a short delay so the display updates quickly
+                    if self.first_run:
+                        sleep_time = 10
+                        logger.info("First run after boot, using 10s startup delay")
+
                     # Update status with next change countdown
                     if sleep_time >= 3600:
                         remaining = f"{sleep_time / 3600:.1f}h"
@@ -154,6 +162,7 @@ class RefreshTask:
 
                     # Wait for sleep_time or until notified
                     self.condition.wait(timeout=sleep_time)
+                    self.first_run = False
                     self.refresh_result = {}
                     self.refresh_event.clear()
 
