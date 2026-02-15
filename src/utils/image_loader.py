@@ -14,23 +14,31 @@ import gc
 import psutil
 import tempfile
 import os
+import requests
 
 logger = logging.getLogger(__name__)
 
+
+_LOW_RESOURCE_CACHE = None
 
 def _is_low_resource_device():
     """
     Detect if running on a low-resource device (e.g., Raspberry Pi Zero).
     Returns True if device has less than 1GB RAM, False otherwise.
+    Result is cached after first call.
     """
+    global _LOW_RESOURCE_CACHE
+    if _LOW_RESOURCE_CACHE is not None:
+        return _LOW_RESOURCE_CACHE
     try:
         total_memory_gb = psutil.virtual_memory().total / (1024 ** 3)
-        is_low_resource = total_memory_gb < 1.0
-        logger.debug(f"Device RAM: {total_memory_gb:.2f}GB - Low resource mode: {is_low_resource}")
-        return is_low_resource
+        _LOW_RESOURCE_CACHE = total_memory_gb < 1.0
+        logger.debug(f"Device RAM: {total_memory_gb:.2f}GB - Low resource mode: {_LOW_RESOURCE_CACHE}")
+        return _LOW_RESOURCE_CACHE
     except Exception as e:
         # If we can't detect, assume low resource to be safe
         logger.warning(f"Could not detect device memory: {e}. Defaulting to low-resource mode.")
+        _LOW_RESOURCE_CACHE = True
         return True
 
 

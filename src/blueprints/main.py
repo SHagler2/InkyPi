@@ -11,7 +11,7 @@ def get_version():
     try:
         with open(version_file, 'r') as f:
             return f.read().strip()
-    except:
+    except Exception:
         return "2.0.0"
 
 @main_bp.route('/')

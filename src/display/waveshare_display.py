@@ -6,7 +6,6 @@ import sys
 from display.abstract_display import AbstractDisplay
 from PIL import Image
 from pathlib import Path
-from plugins.plugin_registry import get_plugin_instance
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +99,7 @@ class WaveshareDisplay(AbstractDisplay):
                 write=True)
 
 
-    def display_image(self, image, image_settings=[]):
+    def display_image(self, image, image_settings=None):
         
         """
         Displays an image on the Waveshare display.

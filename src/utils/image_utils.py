@@ -2,7 +2,6 @@ from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 from io import BytesIO
 import os
 import logging
-import hashlib
 import zlib
 import tempfile
 import subprocess
@@ -27,13 +26,17 @@ def change_orientation(image, orientation, inverted=False):
         angle = 0
     elif orientation == 'vertical':
         angle = 90
+    else:
+        angle = 0
 
     if inverted:
         angle = (angle + 180) % 360
 
     return image.rotate(angle, expand=1)
 
-def resize_image(image, desired_size, image_settings=[]):
+def resize_image(image, desired_size, image_settings=None):
+    if image_settings is None:
+        image_settings = []
     img_width, img_height = image.size
     desired_width, desired_height = desired_size
     desired_width, desired_height = int(desired_width), int(desired_height)
@@ -64,7 +67,9 @@ def resize_image(image, desired_size, image_settings=[]):
     # Step 3: Resize to the exact desired dimensions (if necessary)
     return image.resize((desired_width, desired_height), Image.LANCZOS)
 
-def apply_image_enhancement(img, image_settings={}):
+def apply_image_enhancement(img, image_settings=None):
+    if image_settings is None:
+        image_settings = {}
     # Convert image to RGB mode if necessary for enhancement operations
     # ImageEnhance requires RGB mode for operations like blend
     if img.mode not in ('RGB', 'L'):
@@ -95,24 +100,6 @@ def compute_image_hash(image):
     img_bytes = image.tobytes()
     # Adler-32 is ~10-20x faster than SHA-256 for this use case
     return format(zlib.adler32(img_bytes) & 0xffffffff, '08x')
-
-def take_screenshot_html(html_str, dimensions, timeout_ms=None):
-    image = None
-    try:
-        # Create a temporary HTML file
-        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as html_file:
-            html_file.write(html_str.encode("utf-8"))
-            html_file_path = html_file.name
-
-        image = take_screenshot(html_file_path, dimensions, timeout_ms)
-
-        # Remove html file
-        os.remove(html_file_path)
-
-    except Exception as e:
-        logger.error(f"Failed to take screenshot: {str(e)}")
-
-    return image
 
 def _find_chromium_binary():
     """Find the first available Chromium-based binary in system PATH."""

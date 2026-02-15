@@ -3,25 +3,16 @@
 # set up logging
 import os, logging.config
 
-from pi_heif import register_heif_opener
-
 logging.config.fileConfig(os.path.join(os.path.dirname(__file__), 'config', 'logging.conf'))
 
 # suppress warning from inky library https://github.com/pimoroni/inky/issues/205
 import warnings
 warnings.filterwarnings("ignore", message=".*Busy Wait: Held high.*")
 
-import os
-import random
-import time
-import sys
-import json
 import logging
-import threading
 import argparse
 from utils.app_utils import generate_startup_image
-from flask import Flask, request, send_from_directory
-from werkzeug.serving import is_running_from_reloader
+from flask import Flask
 from config import Config
 from display.display_manager import DisplayManager
 from refresh_task import RefreshTask
@@ -82,7 +73,11 @@ app.register_blueprint(apikeys_bp)
 app.register_blueprint(loops_bp)
 
 # Register opener for HEIF/HEIC images
-register_heif_opener()
+try:
+    from pi_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    logger.debug("pi_heif not available, HEIF/HEIC support disabled")
 
 if __name__ == '__main__':
 
@@ -98,7 +93,7 @@ if __name__ == '__main__':
 
     try:
         # Run the Flask app
-        app.secret_key = str(random.randint(100000,999999))
+        app.secret_key = os.urandom(24).hex()
 
         # Get local IP address for display (only in dev mode when running on non-Pi)
         if DEV_MODE:

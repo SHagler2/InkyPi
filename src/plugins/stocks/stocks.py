@@ -3,7 +3,6 @@ from PIL import Image, ImageDraw
 from utils.app_utils import get_font
 from utils.text_utils import get_text_dimensions, truncate_text
 from utils.layout_utils import calculate_grid
-import yfinance as yf
 import logging
 from datetime import datetime
 
@@ -219,6 +218,7 @@ class Stocks(BasePlugin):
 
     def fetch_stock_data(self, tickers):
         """Fetch stock data for a list of ticker symbols using batch request."""
+        import yfinance as yf
         stocks_data = []
 
         try:

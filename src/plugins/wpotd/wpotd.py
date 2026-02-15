@@ -28,7 +28,6 @@ from utils.http_client import get_http_session
 import logging
 from random import randint
 from datetime import datetime, timedelta, date
-from functools import lru_cache
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)

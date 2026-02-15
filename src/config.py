@@ -25,6 +25,8 @@ class Config:
         self.plugins_list = self.read_plugins_list()
         self.loop_manager = self.load_loop_manager()
         self.refresh_info = self.load_refresh_info()
+        # Load .env once at startup
+        load_dotenv(override=True)
 
     def read_config(self):
         """Reads the device config JSON file and returns it as a dictionary."""
@@ -78,10 +80,10 @@ class Config:
             with open(self.config_file, 'w') as outfile:
                 json.dump(self.config, outfile, indent=4)
 
-    def get_config(self, key=None, default={}):
+    def get_config(self, key=None, default=None):
         """Gets the value of a specific configuration key or returns the entire config if none provided."""
         if key is not None:
-            return self.config.get(key, default)
+            return self.config.get(key, default if default is not None else {})
         return self.config
 
     def get_plugins(self):
@@ -131,9 +133,12 @@ class Config:
             self.write_config()
 
     def load_env_key(self, key):
-        """Loads an environment variable using dotenv and returns its value."""
-        load_dotenv(override=True)
+        """Returns the value of an environment variable."""
         return os.getenv(key)
+
+    def reload_env(self):
+        """Reloads the .env file. Call after modifying API keys."""
+        load_dotenv(override=True)
 
     def load_refresh_info(self):
         """Loads the refresh information from the config."""

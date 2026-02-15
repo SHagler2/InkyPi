@@ -54,7 +54,7 @@ class DisplayManager:
         else:
             raise ValueError(f"Unsupported display type: {display_type}")
 
-    def display_image(self, image, image_settings=[]):
+    def display_image(self, image, image_settings=None):
         
         """
         Delegates image rendering to the appropriate display instance.

@@ -14,7 +14,6 @@ import logging
 import os
 import time
 
-import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from plugins.base_plugin.base_plugin import BasePlugin
@@ -118,6 +117,7 @@ class ShazamPi(BasePlugin):
 
     def _record_audio(self, recording_duration):
         import sounddevice as sd
+        import numpy as np
 
         logger.info(f"Recording {recording_duration}s of audio...")
 

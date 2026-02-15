@@ -45,10 +45,9 @@ def get_http_session() -> requests.Session:
         })
 
         # Configure connection pool
-        # Max 10 connections per host (reasonable for e-ink device)
         adapter = requests.adapters.HTTPAdapter(
-            pool_connections=10,
-            pool_maxsize=10,
+            pool_connections=4,
+            pool_maxsize=4,
             max_retries=3,
             pool_block=False
         )
