@@ -397,9 +397,9 @@ class RefreshTask:
         auto_refresh = self.auto_refresh_plugin_settings.get("autoRefresh")
         if auto_refresh:
             try:
-                minutes = int(auto_refresh)
+                minutes = float(auto_refresh)
                 if minutes > 0:
-                    return minutes * 60
+                    return int(minutes * 60)
             except (ValueError, TypeError):
                 pass
         return None
