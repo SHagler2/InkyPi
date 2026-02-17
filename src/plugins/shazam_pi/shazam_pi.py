@@ -27,7 +27,7 @@ DEFAULT_IMAGE_PATH = os.path.join(PLUGIN_DIR, "resources", "default.jpg")
 
 RAW_SAMPLE_RATE = 44100
 DOWN_SAMPLE_RATE = 16000
-AUDIO_GAIN = 20.0
+AUDIO_GAIN = 1.0
 WEATHER_CACHE_MINUTES = 30
 STATUS_FILE = os.path.join(PLUGIN_DIR, "status.json")
 
@@ -69,7 +69,7 @@ class ShazamPi(BasePlugin):
         if device_config.get_config("orientation") == "vertical":
             dimensions = dimensions[::-1]
 
-        recording_duration = int(settings.get("recordingDuration", 7))
+        recording_duration = int(settings.get("recordingDuration", 8))
 
         # 1. Record audio from USB mic
         self._set_status("recording", f"Recording {recording_duration}s of audio...")
@@ -91,13 +91,25 @@ class ShazamPi(BasePlugin):
                 self._shazam_fail_count = 0
                 self._set_status("rendering", f"Found: {song['title']} by {song['artist']}")
                 return self._render_song(song, dimensions, settings)
-            else:
-                self._shazam_fail_count = getattr(self, '_shazam_fail_count', 0) + 1
-                logger.warning(f"Shazam failed to identify (attempt #{self._shazam_fail_count})")
-                self._set_status("unidentified", f"Could not identify song (attempt #{self._shazam_fail_count})")
-                return self._render_unidentified(
-                    dimensions, settings, device_config, top_class, top_score
-                )
+
+            # Retry: re-record and try Shazam once more
+            logger.info("Shazam failed, retrying with fresh recording...")
+            self._set_status("recording", f"Retrying — recording {recording_duration}s...")
+            raw_audio2, _ = self._record_audio(recording_duration)
+            self._set_status("identifying", "Retry: asking Shazam again...")
+            song = self._identify_song(raw_audio2)
+            if song:
+                self._last_song = song
+                self._shazam_fail_count = 0
+                self._set_status("rendering", f"Found: {song['title']} by {song['artist']}")
+                return self._render_song(song, dimensions, settings)
+
+            self._shazam_fail_count = getattr(self, '_shazam_fail_count', 0) + 1
+            logger.warning(f"Shazam failed to identify after retry (attempt #{self._shazam_fail_count})")
+            self._set_status("unidentified", f"Could not identify song (attempt #{self._shazam_fail_count})")
+            return self._render_unidentified(
+                dimensions, settings, device_config, top_class, top_score
+            )
 
         # 4. No music: show idle display
         logger.info("No music detected, showing idle display")

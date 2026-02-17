@@ -145,7 +145,7 @@
 
         if (loadPluginSettings) {
             $autoRefresh.value = pluginSettings.autoRefresh || '';
-            $recordingDuration.value = pluginSettings.recordingDuration || 7;
+            $recordingDuration.value = pluginSettings.recordingDuration || 8;
             $musicConfidence.value = pluginSettings.musicConfidence || 0.15;
             $fitMode.value = pluginSettings.fitMode || 'fit';
             $pixelated.checked = pluginSettings.pixelated === 'on' || pluginSettings.pixelated === true;
@@ -157,7 +157,7 @@
             $showStatus.checked = pluginSettings.showStatus === 'on' || pluginSettings.showStatus === true;
         } else {
             $autoRefresh.value = '1';
-            $recordingDuration.value = 7;
+            $recordingDuration.value = 8;
             $musicConfidence.value = 0.15;
             $fitMode.value = 'fit';
             $pixelated.checked = false;
