@@ -803,12 +803,13 @@
 
                         const refreshStr = formatDuration(remaining);
 
-                        if (data.loop_enabled && isAutoRefresh && data.loop_rotation_target) {
+                        const isPinned = data.override && data.override.type === 'plugin';
+                        if (data.loop_enabled && !isPinned && isAutoRefresh && data.loop_rotation_target) {
                             const loopRemaining = Math.max(0, Math.round(data.loop_rotation_target - now));
                             const loopStr = formatDuration(loopRemaining);
                             detail = `Refresh in ${refreshStr} · Next plugin in ${loopStr}`;
                             countdownTarget = data.loop_rotation_target;
-                        } else if (data.loop_enabled) {
+                        } else if (data.loop_enabled && !isPinned) {
                             detail = `Next plugin in ${refreshStr}`;
                             countdownTarget = data.countdown_target;
                         } else {
@@ -817,7 +818,7 @@
                     }
                     // Use loop icon when counting down to next plugin
                     let stIcon = stageIcons[data.stage] || stageIcons.idle;
-                    if (data.stage === 'idle' && data.loop_enabled) {
+                    if (data.stage === 'idle' && data.loop_enabled && !(data.override && data.override.type === 'plugin')) {
                         stIcon = '&#128257;'; // 🔁
                     }
                     updateBar(stIcon, detail, data.stage);
