@@ -96,10 +96,9 @@ class ShazamPi(BasePlugin):
                 self._set_status("rendering", f"Found: {song['title']} by {song['artist']}")
                 return self._render_song(song, dimensions, settings)
 
-            # Shazam didn't match — update status so user sees it failed
+            # Shazam didn't match — update status so UI poll picks it up
             self._set_status("no_match", "Shazam: no match. Retrying...")
             logger.info("Shazam failed, retrying with fresh recording...")
-            time.sleep(2)  # Hold status so it's visible in the UI
 
             # Retry: re-record and try Shazam once more
             self._set_status("recording", f"Retrying — recording {recording_duration}s...")
@@ -117,7 +116,6 @@ class ShazamPi(BasePlugin):
             self._shazam_fail_count = getattr(self, '_shazam_fail_count', 0) + 1
             logger.warning(f"Shazam failed to identify after retry (attempt #{self._shazam_fail_count})")
             self._set_status("unidentified", f"Could not identify song (attempt #{self._shazam_fail_count})")
-            time.sleep(2)  # Hold "unidentified" status so user can read it
             return self._render_unidentified(
                 dimensions, settings, device_config, top_class, top_score
             )
