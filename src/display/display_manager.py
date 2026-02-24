@@ -1,6 +1,7 @@
 import fnmatch
 import json
 import logging
+import os
 
 from utils.image_utils import resize_image, change_orientation, apply_image_enhancement
 from display.mock_display import MockDisplay
@@ -17,6 +18,11 @@ try:
     from display.waveshare_display import WaveshareDisplay
 except ImportError:
     logger.info("Waveshare display not available, hardware support disabled")
+
+try:
+    from display.lcd_display import LcdDisplay
+except ImportError:
+    logger.info("LCD display not available")
 
 class DisplayManager:
 
@@ -43,7 +49,9 @@ class DisplayManager:
             self.display = MockDisplay(device_config)
         elif display_type == "inky":
             self.display = InkyDisplay(device_config)
-        elif fnmatch.fnmatch(display_type, "epd*in*"):  
+        elif display_type == "lcd":
+            self.display = LcdDisplay(device_config)
+        elif fnmatch.fnmatch(display_type, "epd*in*"):
             # derived from waveshare epd - we assume here that will be consistent
             # otherwise we will have to enshring the manufacturer in the 
             # display_type and then have a display_model parameter.  Will leave
@@ -70,9 +78,12 @@ class DisplayManager:
         if not hasattr(self, "display"):
             raise ValueError("No valid display instance initialized.")
         
-        # Save the image
+        # Save the image atomically (temp file + rename) so the web UI
+        # never fetches a half-written file
         logger.info(f"Saving image to {self.device_config.current_image_file}")
-        image.save(self.device_config.current_image_file)
+        tmp_path = self.device_config.current_image_file.replace(".png", "_tmp.png")
+        image.save(tmp_path)
+        os.replace(tmp_path, self.device_config.current_image_file)
 
         # Resize and adjust orientation
         image = change_orientation(image, self.device_config.get_config("orientation"))

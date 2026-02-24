@@ -37,7 +37,7 @@
 
         <!-- Live Refresh Status -->
         <div id="loopsStatus" class="live-status-card">
-            <span id="loopsStatusIcon" class="live-status-icon">&#9881;</span>
+            <span id="loopsStatusIcon" class="live-status-icon">&#9889;</span>
             <span id="loopsStatusText" class="live-status-text">Ready</span>
         </div>
 
@@ -56,6 +56,20 @@
             </div>
         </div>
 
+        <!-- Override Banner -->
+        {% if loop_override %}
+        <div id="loopsOverrideBanner" class="override-banner visible">
+            {% if loop_override.type == 'loop' %}
+            <span class="override-icon">🔄</span>
+            <span><span class="override-label">Override</span> <span class="override-name">{{ loop_override.loop_name }}</span></span>
+            {% elif loop_override.type == 'plugin' %}
+            <span class="override-icon">📌</span>
+            <span><span class="override-label">Pinned</span> <span class="override-name">{{ plugins.get(loop_override.plugin_id, {}).get('display_name', loop_override.plugin_id) }}</span></span>
+            {% endif %}
+            <button onclick="clearOverride()" class="override-dismiss">Resume Schedule</button>
+        </div>
+        {% endif %}
+
         <!-- Loops List -->
         <div class="loop-list">
             {% for loop_item in loop_config.loops %}
@@ -69,6 +83,13 @@
                         <div style="margin-top: 6px; font-size: 13px; color: var(--text-secondary); font-weight: 400;">{{ loop_item.start_time }} - {{ loop_item.end_time }}</div>
                     </div>
                     <div style="display: flex; gap: 8px; align-items: center;">
+                        {% set is_override = loop_override and loop_override.type == 'loop' and loop_override.loop_name == loop_item.name %}
+                        <button onclick="{% if is_override %}clearOverride(){% else %}activateLoopOverride('{{ loop_item.name }}'){% endif %}"
+                                class="action-button"
+                                style="padding: 8px 14px; font-size: 14px; font-weight: 500; background: {{ 'var(--warning-border, #ffc107)' if is_override else 'var(--accent-primary, #007bff)' }}; color: {{ 'var(--warning-text, #856404)' if is_override else 'white' }};"
+                                title="{{ 'Deactivate override' if is_override else 'Activate this loop as override' }}">
+                            {{ 'Deactivate' if is_override else 'Activate' }}
+                        </button>
                         <button onclick="toggleRandomize('{{ loop_item.name }}')"
                                 id="randomize-{{ loop_item.name }}"
                                 class="action-button"
@@ -191,20 +212,8 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div style="margin: 15px 0;">
-                    <label>Refresh Interval:</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="number" id="refreshInterval" value="30" min="1" required style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-                        <select id="refreshUnit" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-                            <option value="1">Seconds</option>
-                            <option value="60" selected>Minutes</option>
-                            <option value="3600">Hours</option>
-                            <option value="86400">Days</option>
-                        </select>
-                    </div>
-                </div>
                 <div style="display: flex; gap: 10px; margin-top: 20px;">
-                    <button type="submit" style="flex: 1; padding: 10px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">Add</button>
+                    <button type="submit" style="flex: 1; padding: 10px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">Next</button>
                     <button type="button" onclick="closePluginModal()" style="flex: 1; padding: 10px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
                 </div>
             </form>
@@ -470,42 +479,45 @@
         let refreshStartTimestamp = 0;
         let pollTimer = null;
 
-        // Restore toggle state from localStorage
+        // Restore toggle state from localStorage (default to checked)
         try {
             const saved = localStorage.getItem(STORAGE_KEY);
-            toggle.checked = saved === 'true';
-        } catch (e) { toggle.checked = false; }
+            toggle.checked = saved === null ? true : saved === 'true';
+        } catch (e) { toggle.checked = true; }
 
-        toggle.addEventListener('change', function() {
-            try { localStorage.setItem(STORAGE_KEY, toggle.checked); } catch (e) {}
-            if (toggle.checked) { startPolling(); }
-            else { stopPolling(); hideBar(); }
-        });
-
-        function showBar() {
-            bar.style.display = 'flex';
-        }
-
-        function hideBar() {
-            bar.style.display = 'none';
-        }
-
-        function setBarStyle(stage) {
-            bar.classList.remove('status-success', 'status-error', 'status-active');
-            if (stage === 'displayed' || stage === 'rendering') {
-                bar.classList.add('status-success');
-            } else if (stage === 'error' || stage === 'unidentified') {
-                bar.classList.add('status-error');
+        function applyToggleState() {
+            if (toggle.checked) {
+                bar.classList.remove('status-disabled');
+                startPolling();
             } else {
-                bar.classList.add('status-active');
+                stopPolling();
+                hideBar();
+                bar.classList.add('status-disabled');
             }
         }
 
+        toggle.addEventListener('change', function() {
+            try { localStorage.setItem(STORAGE_KEY, toggle.checked); } catch (e) {}
+            applyToggleState();
+        });
+
+        function showBar() {
+            bar.style.visibility = 'visible';
+        }
+
+        function hideBar() {
+            bar.style.visibility = 'hidden';
+        }
+
+        function setBarStyle(stage) {
+            // Status bar uses consistent styling; icons convey state
+        }
+
         const stageIcons = {
-            refreshing:  '&#9881;',    generating:  '&#9881;',
-            processing:  '&#9881;',    displaying:  '&#128228;',
+            refreshing:  '&#9889;',  generating:  '&#9889;',
+            processing:  '&#9889;',  displaying:  '&#10024;',
             displayed:   '&#9989;',    idle:        '&#128164;',
-            error:       '&#9888;',    starting:    '&#9881;',
+            error:       '&#128308;',  starting:    '&#9889;',
             recording:   '&#127908;',  detecting:   '&#129504;',
             detected:    '&#127925;',  identifying: '&#128269;',
             rendering:   '&#127912;',  unidentified:'&#10067;',
@@ -581,8 +593,8 @@
             if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         }
 
-        // Start polling if toggle is already on
-        if (toggle.checked) startPolling();
+        // Apply initial toggle state
+        applyToggleState();
 
         // Public API for refreshPluginNow to call
         return {

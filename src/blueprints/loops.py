@@ -15,12 +15,16 @@ def loops_page():
     refresh_info = device_config.get_refresh_info()
     plugins_list = device_config.get_plugins()
 
+    # Get loop override info for override banner
+    loop_override = device_config.get_loop_override() if hasattr(device_config, 'get_loop_override') else None
+
     return render_template(
         'loops.html',
         loop_config=loop_manager.to_dict(),
         refresh_info=refresh_info.to_dict(),
         plugins={p["id"]: p for p in plugins_list},
-        all_plugins=plugins_list
+        all_plugins=plugins_list,
+        loop_override=loop_override
     )
 
 @loops_bp.route('/create_loop', methods=['POST'])
@@ -200,7 +204,13 @@ def update_plugin_settings():
     if not plugin_ref:
         return jsonify({"error": "Plugin not found in loop"}), 404
 
-    plugin_ref.plugin_settings = plugin_settings
+    # Merge new settings with existing to avoid losing fields the client didn't send
+    if plugin_ref.plugin_settings and plugin_settings:
+        merged = dict(plugin_ref.plugin_settings)
+        merged.update(plugin_settings)
+        plugin_ref.plugin_settings = merged
+    elif plugin_settings:
+        plugin_ref.plugin_settings = plugin_settings
     if refresh_interval:
         plugin_ref.refresh_interval_seconds = refresh_interval
 

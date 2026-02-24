@@ -80,6 +80,9 @@ class ISSTracker(BasePlugin):
         timezone_name = device_config.get_config("timezone", default="UTC")
         time_format = device_config.get_config("time_format", default="12h")
 
+        # Find observer's nearest city for "Next pass over <city>" display
+        obs_city = _nearest_city(lat, lon, landmarks_path)
+
         if mode == "nadir":
             img = self._render_nadir(
                 dimensions,
@@ -95,6 +98,7 @@ class ISSTracker(BasePlugin):
                 time_format,
                 tle_lines,
                 now_utc,
+                obs_city,
             )
         elif mode == "prepass":
             active_pass = _get_active_pass(now_utc, passes, prepass_minutes)
@@ -140,6 +144,7 @@ class ISSTracker(BasePlugin):
         time_format,
         tle_lines,
         now_utc,
+        obs_city="",
     ):
         w, h = dimensions
         info_h = int(h * 0.18)
@@ -201,6 +206,7 @@ class ISSTracker(BasePlugin):
             units,
             timezone_name,
             time_format,
+            obs_city,
         )
 
         return img
@@ -347,6 +353,7 @@ class ISSTracker(BasePlugin):
         units,
         timezone_name,
         time_format,
+        obs_city="",
     ):
         # Background
         draw.rectangle([(0, map_h), (w, h)], fill=(0, 0, 0))
@@ -418,7 +425,10 @@ class ISSTracker(BasePlugin):
                 time_str = rise_local.strftime("%I:%M %p").lstrip("0")
 
             max_el = next_pass.get("max_elevation", 0)
-            pass_text = f"Next pass: {time_str}"
+            if obs_city:
+                pass_text = f"Next pass over {obs_city}: {time_str}"
+            else:
+                pass_text = f"Next pass: {time_str}"
             el_text = f"Max el: {max_el:.0f}\u00b0"
 
             # Right-align
@@ -970,6 +980,29 @@ def _get_crew_count():
         return 0
 
 
+def _nearest_city(lat, lon, landmarks_path):
+    """Find the nearest city name to the observer's location."""
+    try:
+        with open(landmarks_path, "r") as f:
+            landmarks = json.load(f)
+    except Exception:
+        return ""
+
+    min_dist = float("inf")
+    nearest = None
+    for lm in landmarks:
+        d = _haversine(lat, lon, lm["lat"], lm["lon"])
+        if d < min_dist:
+            min_dist = d
+            nearest = lm
+
+    if nearest:
+        # Return just the city name (before the comma)
+        name = nearest["name"]
+        return name.split(",")[0].strip()
+    return ""
+
+
 def _reverse_geocode(lat, lon, landmarks_path):
     """Find nearest landmark using bundled landmarks.json."""
     try:
@@ -1040,7 +1073,7 @@ def _predict_passes(tle_lines, obs_lat, obs_lon, now_utc, n2yo_api_key=None):
 
 
 def _predict_passes_skyfield(tle_lines, obs_lat, obs_lon, now_utc):
-    """Use Skyfield's find_events() for pass prediction."""
+    """Use Skyfield's find_events() for pass prediction with visibility check."""
     from skyfield.api import load, wgs84, EarthSatellite
 
     ts = load.timescale()
@@ -1048,17 +1081,21 @@ def _predict_passes_skyfield(tle_lines, obs_lat, obs_lon, now_utc):
     observer = wgs84.latlon(obs_lat, obs_lon)
 
     t0 = ts.from_datetime(now_utc)
-    t1 = ts.from_datetime(now_utc + timedelta(hours=48))
+    t1 = ts.from_datetime(now_utc + timedelta(days=10))
 
     t_events, events = sat.find_events(observer, t0, t1, altitude_degrees=10.0)
 
+    # Load ephemeris once for sunlit/sun-altitude checks
+    eph = load("de421.bsp")
+
     passes = []
     current_pass = {}
+    culmination_ti = None
     for ti, event in zip(t_events, events):
         dt = ti.utc_datetime()
         if event == 0:  # rise
             current_pass = {"rise_utc": dt}
-            # Compute rise azimuth
+            culmination_ti = None
             difference = sat - observer
             topocentric = difference.at(ti)
             alt_deg, az_deg, _ = topocentric.altaz()
@@ -1066,6 +1103,7 @@ def _predict_passes_skyfield(tle_lines, obs_lat, obs_lon, now_utc):
         elif event == 1:  # culmination
             if current_pass:
                 current_pass["culmination_utc"] = dt
+                culmination_ti = ti
                 difference = sat - observer
                 topocentric = difference.at(ti)
                 alt_deg, az_deg, _ = topocentric.altaz()
@@ -1079,9 +1117,32 @@ def _predict_passes_skyfield(tle_lines, obs_lat, obs_lon, now_utc):
                 current_pass["set_azimuth"] = az_deg.degrees
                 current_pass.setdefault("max_elevation", 10)
                 current_pass.setdefault("rise_azimuth", 0)
+
+                # Visibility check at culmination (peak of pass)
+                visible = False
+                if culmination_ti is not None:
+                    try:
+                        # Check if ISS is sunlit at peak
+                        diff_at_peak = (sat - observer).at(culmination_ti)
+                        iss_sunlit = diff_at_peak.is_sunlit(eph)
+
+                        # Check if observer is in darkness (sun below -6° = civil twilight)
+                        obs_location = eph["earth"] + observer
+                        sun_from_obs = obs_location.at(culmination_ti).observe(eph["sun"])
+                        sun_alt, _, _ = sun_from_obs.apparent().altaz()
+                        observer_dark = sun_alt.degrees < -6.0
+
+                        visible = bool(iss_sunlit) and observer_dark
+                    except Exception as e:
+                        logger.debug(f"Visibility check failed for pass: {e}")
+
+                current_pass["visible"] = visible
                 passes.append(current_pass)
                 current_pass = {}
+                culmination_ti = None
 
+    visible_count = sum(1 for p in passes if p.get("visible"))
+    logger.info(f"Pass prediction: {len(passes)} total, {visible_count} visible")
     return passes
 
 
@@ -1107,14 +1168,17 @@ def _predict_passes_n2yo(obs_lat, obs_lon, api_key):
                 "max_elevation": p.get("maxEl", 0),
                 "rise_azimuth": p.get("startAz", 0),
                 "set_azimuth": p.get("endAz", 0),
+                "visible": True,  # N2YO visualpasses endpoint only returns visible passes
             }
         )
     return passes
 
 
 def _determine_mode(now_utc, passes, prepass_minutes):
-    """Determine display mode based on pass timing."""
+    """Determine display mode based on visible pass timing."""
     for p in passes:
+        if not p.get("visible"):
+            continue
         rise = p["rise_utc"]
         sett = p["set_utc"]
 

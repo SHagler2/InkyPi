@@ -21,3 +21,4 @@ scipy
 shazamio
 ai-edge-litert
 skyfield>=1.45
+sgp4

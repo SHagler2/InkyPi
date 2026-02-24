@@ -5,7 +5,6 @@ from io import BytesIO
 import base64
 import random
 import html
-import feedparser
 from utils.http_client import get_http_session
 import logging
 
@@ -185,6 +184,7 @@ class AIImage(BasePlugin):
             try:
                 resp = session.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
                 resp.raise_for_status()
+                import feedparser
                 feed = feedparser.parse(resp.content)
                 for entry in feed.entries:
                     title = entry.get("title", "").strip()

@@ -14,9 +14,10 @@ def plugin_page(plugin_id):
     device_config = current_app.config['DEVICE_CONFIG']
     loop_manager = device_config.get_loop_manager()
 
-    # Check for loop edit mode (coming from loops page)
+    # Check for loop edit/add mode (coming from loops page)
     loop_name = request.args.get('loop_name', '')
     edit_mode = request.args.get('edit_mode', 'false') == 'true'
+    add_mode = request.args.get('add_mode', 'false') == 'true'
 
     # If editing a loop plugin, get existing settings
     existing_settings = {}
@@ -40,7 +41,8 @@ def plugin_page(plugin_id):
             # Plugin settings are now managed through loops
 
             template_params["loops"] = loop_manager.get_loop_names()
-            template_params["loop_edit_mode"] = edit_mode
+            template_params["loop_edit_mode"] = edit_mode or add_mode
+            template_params["loop_add_mode"] = add_mode
             template_params["loop_name"] = loop_name
             template_params["loop_refresh_interval"] = existing_refresh_interval
 
@@ -98,6 +100,102 @@ def image(plugin_id, filename):
     # Serve the file from the plugin directory
     return send_from_directory(abs_plugin_dir, filename)
 
+@plugin_bp.route('/upload_image', methods=['POST'])
+def upload_image():
+    """Upload a single image file to disk. Returns the saved file path.
+    Used for immediate per-file uploads with progress feedback."""
+    try:
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify({"error": "No file provided"}), 400
+
+        allowed_extensions = {'pdf', 'png', 'avif', 'jpg', 'jpeg', 'gif', 'webp', 'heif', 'heic'}
+        extension = os.path.splitext(file.filename)[1].replace('.', '').lower()
+        if extension not in allowed_extensions:
+            return jsonify({"error": f"File type .{extension} not allowed"}), 400
+
+        file_name = os.path.basename(file.filename)
+        file_save_dir = resolve_path(os.path.join("static", "images", "saved"))
+        os.makedirs(file_save_dir, exist_ok=True)
+        file_path = os.path.join(file_save_dir, file_name)
+
+        # Save raw bytes to disk (no PIL processing to avoid OOM)
+        file.save(file_path)
+
+        # Fix EXIF orientation for JPEGs (skip very large images)
+        if extension in {'jpg', 'jpeg'}:
+            try:
+                from PIL import Image, ImageOps
+                with Image.open(file_path) as img:
+                    w, h = img.size
+                    megapixels = (w * h) / 1_000_000
+                    if megapixels <= 50:
+                        transposed = ImageOps.exif_transpose(img)
+                        if transposed is not img:
+                            transposed.save(file_path)
+                            transposed.close()
+                import gc; gc.collect()
+            except Exception as e:
+                logger.warning(f"EXIF processing error for {file_name}: {e}")
+
+        logger.info(f"Uploaded image: {file_name} ({os.path.getsize(file_path)} bytes)")
+        return jsonify({"success": True, "file_path": file_path, "file_name": file_name}), 200
+
+    except Exception as e:
+        logger.exception(f"Error uploading image: {str(e)}")
+        return jsonify({"error": f"Upload failed: {str(e)}"}), 500
+
+
+@plugin_bp.route('/check_files', methods=['POST'])
+def check_files():
+    """Check which files from a list exist on disk. Returns a map of path -> exists."""
+    try:
+        data = request.get_json()
+        file_paths = data.get('file_paths', [])
+        result = {fp: os.path.isfile(fp) for fp in file_paths}
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@plugin_bp.route('/delete_image', methods=['POST'])
+def delete_image():
+    """Delete a single uploaded image file from disk and update saved settings."""
+    device_config = current_app.config['DEVICE_CONFIG']
+    try:
+        data = request.get_json()
+        file_path = data.get('file_path', '')
+        if not file_path:
+            return jsonify({"error": "No file path provided"}), 400
+
+        # Security: only allow deleting from the saved images directory
+        saved_dir = os.path.abspath(resolve_path(os.path.join("static", "images", "saved")))
+        abs_path = os.path.abspath(file_path)
+        if not abs_path.startswith(saved_dir):
+            return jsonify({"error": "Invalid file path"}), 403
+
+        if os.path.exists(abs_path):
+            os.remove(abs_path)
+            logger.info(f"Deleted image: {os.path.basename(abs_path)}")
+
+        # Remove from saved settings so UI stays in sync
+        for key in ["plugin_last_settings_image_upload", "auto_refresh_tracking"]:
+            settings = device_config.get_config(key, default={})
+            if key == "auto_refresh_tracking":
+                settings = settings.get("plugin_settings", {})
+            file_list = settings.get("imageFiles[]", [])
+            if file_path in file_list:
+                file_list.remove(file_path)
+
+        device_config.write_config()
+
+        return jsonify({"success": True}), 200
+
+    except Exception as e:
+        logger.exception(f"Error deleting image: {str(e)}")
+        return jsonify({"error": f"Delete failed: {str(e)}"}), 500
+
+
 @plugin_bp.route('/update_now_async', methods=['POST'])
 def update_now_async():
     """Non-blocking update endpoint. Queues the update and returns immediately.
@@ -107,13 +205,22 @@ def update_now_async():
 
     try:
         plugin_settings = parse_form(request.form)
+
+        # Show upload progress in live status
+        file_list = request.files.getlist('imageFiles[]')
+        new_files = [f for f in file_list if f.filename]
+        if new_files:
+            refresh_task._set_global_status("uploading", f"Saving {len(new_files)} image(s) to disk...")
+
         plugin_settings.update(handle_request_files(request.files))
         plugin_id = plugin_settings.pop("plugin_id")
 
         # Remember settings for next time the plugin page is opened
-        device_config.update_value(
-            f"plugin_last_settings_{plugin_id}", dict(plugin_settings)
-        )
+        # Don't overwrite with empty dict (e.g., from curl with just plugin_id)
+        if plugin_settings:
+            device_config.update_value(
+                f"plugin_last_settings_{plugin_id}", dict(plugin_settings)
+            )
 
         if refresh_task.running:
             queued = refresh_task.queue_manual_update(ManualRefresh(plugin_id, plugin_settings))

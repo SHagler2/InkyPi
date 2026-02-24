@@ -66,6 +66,7 @@ class RefreshTask:
 
         # First run after boot uses a short delay so the display updates quickly
         self.first_run = True
+        self._displayed_this_boot = False
 
         # If no auto-refresh tracking but current plugin is stocks, restore from saved settings
         if not self.auto_refresh_plugin_settings:
@@ -87,7 +88,7 @@ class RefreshTask:
             for f in os.listdir(GLOBAL_STATUS_DIR):
                 if f.endswith('.tmp'):
                     try: os.remove(os.path.join(GLOBAL_STATUS_DIR, f))
-                    except OSError: pass
+                    except OSError as e: logger.debug("Could not remove temp file %s: %s", f, e)
             self._set_global_status("idle", "Starting up...")
             self.thread = threading.Thread(target=self._run, daemon=True)
             self.running = True
@@ -153,17 +154,37 @@ class RefreshTask:
                         sleep_time = 10
                         logger.info("First run after boot, using 10s startup delay")
 
-                    # Update status with next change countdown
-                    if sleep_time >= 3600:
-                        remaining = f"{sleep_time / 3600:.1f}h"
-                    elif sleep_time >= 60:
-                        remaining = f"{int(sleep_time / 60)}m"
+                    # If a manual update was queued while we were processing, skip the wait
+                    if self.manual_update_request:
+                        logger.info("Manual update already queued, skipping wait")
                     else:
-                        remaining = f"{int(sleep_time)}s"
-                    self._set_global_status("idle", f"Next change in {remaining}")
+                        # Compute remaining time until next loop rotation
+                        loop_enabled = self.device_config.get_config("loop_enabled", default=True)
+                        loop_remaining = None
+                        if loop_enabled:
+                            loop_interval = loop_manager.rotation_interval_seconds
+                            if self.last_loop_rotation_time:
+                                current_dt_status = self._get_current_datetime()
+                                elapsed = (current_dt_status - self.last_loop_rotation_time).total_seconds()
+                                loop_remaining = max(0, int(loop_interval - elapsed))
+                            else:
+                                loop_remaining = int(loop_interval)
 
-                    # Wait for sleep_time or until notified
-                    self.condition.wait(timeout=sleep_time)
+                        # Build contextual detail text
+                        is_refresh = use_auto_refresh and auto_refresh_seconds and auto_refresh_seconds < loop_manager.rotation_interval_seconds
+                        time_str = self._format_duration(sleep_time)
+                        if loop_enabled and is_refresh and loop_remaining is not None:
+                            loop_str = self._format_duration(loop_remaining)
+                            detail = f"Refresh in {time_str} · Next plugin in {loop_str}"
+                        elif loop_enabled:
+                            detail = f"Next plugin in {time_str}"
+                        else:
+                            detail = f"Next refresh in {time_str}"
+
+                        self._set_global_status("idle", detail)
+
+                        # Wait for sleep_time or until notified
+                        self.condition.wait(timeout=sleep_time)
                     self.first_run = False
                     self.refresh_result = {}
                     self.refresh_event.clear()
@@ -188,46 +209,95 @@ class RefreshTask:
                         if self.device_config.get_config("log_system_stats"):
                             self.log_system_stats()
 
-                        # Check if loop rotation is enabled
-                        loop_enabled = self.device_config.get_config("loop_enabled", default=True)
-
-                        # Check if loop rotation is overdue (takes priority over auto-refresh)
-                        loop_rotation_due = False
-                        if loop_enabled:
-                            loop_manager = self.device_config.get_loop_manager()
-                            rotation_interval = loop_manager.rotation_interval_seconds
-                            if self.last_loop_rotation_time:
-                                elapsed_since_rotation = (current_dt - self.last_loop_rotation_time).total_seconds()
-                                loop_rotation_due = elapsed_since_rotation >= rotation_interval
+                        # On first boot cycle, force an immediate render
+                        first_boot_plugin_id = None
+                        if not self._displayed_this_boot:
+                            self._displayed_this_boot = True
+                            # Try latest_refresh first, then fall back to finding any plugin
+                            if latest_refresh and latest_refresh.plugin_id:
+                                first_boot_plugin_id = latest_refresh.plugin_id
                             else:
-                                # No rotation tracked yet - first run, do rotation
-                                loop_rotation_due = True
+                                first_boot_plugin_id = self._find_any_plugin_id()
+                                if first_boot_plugin_id:
+                                    logger.info(f"No last plugin known, falling back to: {first_boot_plugin_id}")
 
-                        if loop_rotation_due:
-                            # Loop rotation takes priority over auto-refresh
-                            logger.info(f"Running interval refresh check. | current_time: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+                            if first_boot_plugin_id:
+                                # Try to use saved settings for this plugin
+                                saved_settings = self.device_config.get_config(
+                                    f"plugin_last_settings_{first_boot_plugin_id}", default={}
+                                )
+                                if not saved_settings:
+                                    # Check loop for settings
+                                    loop_mgr = self.device_config.get_loop_manager()
+                                    for loop in loop_mgr.loops:
+                                        for ref in loop.plugin_order:
+                                            if ref.plugin_id == first_boot_plugin_id and ref.plugin_settings:
+                                                saved_settings = dict(ref.plugin_settings)
+                                                break
+                                        if saved_settings:
+                                            break
 
-                            loop_manager = self.device_config.get_loop_manager()
-                            loop, plugin_ref = self._determine_next_plugin_loop_mode(loop_manager, current_dt)
-                            if plugin_ref:
-                                refresh_action = LoopRefresh(loop, plugin_ref)
-                                pname = self._get_display_name(plugin_ref.plugin_id)
-                                self._set_global_status("refreshing", f"Loading {pname}...", pname, plugin_ref.plugin_id)
-                        elif use_auto_refresh and self._should_auto_refresh(current_dt):
-                            # Auto-refresh current plugin (only if loop rotation isn't due)
-                            logger.info(f"Auto-refreshing current plugin: {latest_refresh.plugin_id}")
-                            refresh_action = AutoRefresh(latest_refresh.plugin_id, self.auto_refresh_plugin_settings)
-                            pname = self._get_display_name(latest_refresh.plugin_id)
-                            self._set_global_status("refreshing", f"Auto-refreshing {pname}...", pname, latest_refresh.plugin_id)
-                        elif not loop_enabled:
-                            # Loop is disabled - but if auto-refresh is configured, we should
-                            # still wait for the next auto-refresh interval, not skip entirely
-                            if use_auto_refresh:
-                                elapsed = (current_dt - self.last_display_time).total_seconds() if self.last_display_time else 0
-                                logger.info(f"Loop disabled, auto-refresh waiting (elapsed: {elapsed:.0f}s / {self._get_auto_refresh_seconds()}s)")
-                            else:
-                                logger.info("Loop rotation is disabled, no action needed")
-                            continue
+                                refresh_action = ManualRefresh(first_boot_plugin_id, saved_settings)
+                                pname = self._get_display_name(first_boot_plugin_id)
+                                self._set_global_status("refreshing", f"First boot: {pname}...", pname, first_boot_plugin_id)
+                                logger.info(f"First-boot display: {first_boot_plugin_id}")
+
+                        if not refresh_action:
+                            # Check for override (pin plugin or override loop)
+                            loop_override = self.device_config.get_loop_override() if hasattr(self.device_config, 'get_loop_override') else None
+                            plugin_pin_active = loop_override and loop_override.get("type") == "plugin"
+
+                            # Check if loop rotation is enabled
+                            loop_enabled = self.device_config.get_config("loop_enabled", default=True)
+
+                            # Check if loop rotation is overdue (takes priority over auto-refresh)
+                            # But NOT when a plugin is pinned
+                            loop_rotation_due = False
+                            if loop_enabled and not plugin_pin_active:
+                                loop_manager = self.device_config.get_loop_manager()
+                                rotation_interval = loop_manager.rotation_interval_seconds
+                                if self.last_loop_rotation_time:
+                                    elapsed_since_rotation = (current_dt - self.last_loop_rotation_time).total_seconds()
+                                    loop_rotation_due = elapsed_since_rotation >= rotation_interval
+                                else:
+                                    # No rotation tracked yet - first run, do rotation
+                                    loop_rotation_due = True
+
+                            # If a plugin is pinned and we're showing the wrong one, switch immediately
+                            if plugin_pin_active and latest_refresh and latest_refresh.plugin_id != loop_override.get("plugin_id"):
+                                pinned_id = loop_override.get("plugin_id")
+                                logger.info(f"Switching to pinned plugin: {pinned_id}")
+                                plugin_settings = self.device_config.get_config(
+                                    f"plugin_last_settings_{pinned_id}", default={}
+                                )
+                                refresh_action = AutoRefresh(pinned_id, plugin_settings)
+                                pname = self._get_display_name(pinned_id)
+                                self._set_global_status("refreshing", f"Pinned: {pname}...", pname, pinned_id)
+                            elif loop_rotation_due:
+                                # Loop rotation takes priority over auto-refresh
+                                logger.info(f"Running interval refresh check. | current_time: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+
+                                loop_manager = self.device_config.get_loop_manager()
+                                loop, plugin_ref = self._determine_next_plugin_loop_mode(loop_manager, current_dt, override=loop_override)
+                                if plugin_ref:
+                                    refresh_action = LoopRefresh(loop, plugin_ref)
+                                    pname = self._get_display_name(plugin_ref.plugin_id)
+                                    self._set_global_status("refreshing", f"Loading {pname}...", pname, plugin_ref.plugin_id)
+                            elif use_auto_refresh and self._should_auto_refresh(current_dt):
+                                # Auto-refresh current plugin (only if loop rotation isn't due)
+                                logger.info(f"Auto-refreshing current plugin: {latest_refresh.plugin_id}")
+                                refresh_action = AutoRefresh(latest_refresh.plugin_id, self.auto_refresh_plugin_settings)
+                                pname = self._get_display_name(latest_refresh.plugin_id)
+                                self._set_global_status("refreshing", f"Auto-refreshing {pname}...", pname, latest_refresh.plugin_id)
+                            elif not loop_enabled:
+                                # Loop is disabled - but if auto-refresh is configured, we should
+                                # still wait for the next auto-refresh interval, not skip entirely
+                                if use_auto_refresh:
+                                    elapsed = (current_dt - self.last_display_time).total_seconds() if self.last_display_time else 0
+                                    logger.info(f"Loop disabled, auto-refresh waiting (elapsed: {elapsed:.0f}s / {self._get_auto_refresh_seconds()}s)")
+                                else:
+                                    logger.info("Loop rotation is disabled, no action needed")
+                                continue
 
                     if refresh_action:
                         plugin_config = self.device_config.get_plugin(refresh_action.get_plugin_id())
@@ -241,6 +311,19 @@ class RefreshTask:
 
                         self._set_global_status("generating", f"Generating {plugin_name}...", plugin_name, plugin_id)
                         image = refresh_action.execute(plugin, self.device_config, current_dt)
+
+                        # Plugin returned None — skip display update (e.g., grace period)
+                        if image is None:
+                            logger.info(f"Plugin returned None, skipping display update. | plugin_id: {plugin_id}")
+                            self._set_global_status("displayed", f"No update needed: {plugin_name}", plugin_name, plugin_id)
+                            continue
+
+                        # Apply style settings (frame/margins) if configured
+                        ps = getattr(refresh_action, 'plugin_settings', None)
+                        if ps is None and hasattr(refresh_action, 'plugin_reference'):
+                            ps = refresh_action.plugin_reference.plugin_settings or {}
+                        if ps:
+                            image = self._apply_style_settings(image, ps)
 
                         # Add plugin icon overlay if enabled
                         if self.device_config.get_config("show_plugin_icon", default=False):
@@ -265,6 +348,20 @@ class RefreshTask:
 
                         # update latest refresh data in the device config (in-memory only)
                         self.device_config.refresh_info = RefreshInfo(**refresh_info)
+
+                        # Persist plugin settings back (plugins may modify settings, e.g. reconciliation)
+                        plugin_settings_after = getattr(refresh_action, 'plugin_settings', None)
+                        if plugin_settings_after:
+                            self.device_config.update_value(
+                                f"plugin_last_settings_{plugin_id}", dict(plugin_settings_after), write=False
+                            )
+                        elif hasattr(refresh_action, 'plugin_reference'):
+                            # LoopRefresh: sync plugin_last_settings from loop's authoritative settings
+                            ref_settings = refresh_action.plugin_reference.plugin_settings
+                            if ref_settings:
+                                self.device_config.update_value(
+                                    f"plugin_last_settings_{plugin_id}", dict(ref_settings), write=False
+                                )
 
                         # Track loop rotation time (distinct from auto-refresh time)
                         # This ensures the countdown timer reflects actual loop rotations,
@@ -368,6 +465,19 @@ class RefreshTask:
         tz_str = self.device_config.get_config("timezone", default="UTC")
         return datetime.now(pytz.timezone(tz_str))
 
+    def _format_duration(self, seconds):
+        """Format seconds into a human-readable duration string."""
+        seconds = int(seconds)
+        if seconds >= 3600:
+            h = seconds // 3600
+            m = (seconds % 3600) // 60
+            return f"{h}h {m}m" if m else f"{h}h"
+        elif seconds >= 60:
+            m = seconds // 60
+            return f"{m}m"
+        else:
+            return f"{seconds}s"
+
     def _get_display_name(self, plugin_id):
         """Get the human-readable display name for a plugin ID."""
         cfg = self.device_config.get_plugin(plugin_id)
@@ -398,11 +508,55 @@ class RefreshTask:
             with os.fdopen(fd, 'w') as f:
                 json.dump(status, f)
             os.rename(tmp_path, GLOBAL_STATUS_FILE)
-        except Exception:
-            pass  # Non-critical
+        except Exception as e:
+            logger.debug("Failed to write global status: %s", e)
+
+    def _apply_style_settings(self, image, plugin_settings):
+        """Apply frame overlay and margins from style settings to a plugin image."""
+        try:
+            from PIL import ImageDraw
+            from utils.layout_utils import draw_frame
+
+            frame_style = plugin_settings.get("selectedFrame", "None")
+            top = int(plugin_settings.get("topMargin", 0) or 0)
+            bottom = int(plugin_settings.get("bottomMargin", 0) or 0)
+            left = int(plugin_settings.get("leftMargin", 0) or 0)
+            right = int(plugin_settings.get("rightMargin", 0) or 0)
+
+            has_margins = top > 0 or bottom > 0 or left > 0 or right > 0
+            has_frame = frame_style and frame_style != "None"
+
+            if not has_margins and not has_frame:
+                return image
+
+            # Apply margins by creating a new image with bg color and pasting content inset
+            if has_margins:
+                bg_color = plugin_settings.get("backgroundColor", "#ffffff")
+                w, h = image.size
+                margined = Image.new("RGBA", (w, h), bg_color)
+                # Shrink the plugin image to fit within margins
+                inner_w = max(1, w - left - right)
+                inner_h = max(1, h - top - bottom)
+                resized = image.resize((inner_w, inner_h), Image.LANCZOS)
+                margined.paste(resized, (left, top))
+                image = margined
+
+            # Draw frame on top
+            if has_frame:
+                if image.mode != "RGBA":
+                    image = image.convert("RGBA")
+                draw = ImageDraw.Draw(image)
+                text_color = plugin_settings.get("textColor", "#000000")
+                margin = {"top": top, "bottom": bottom, "left": left, "right": right}
+                draw_frame(draw, image.size, frame_style, text_color, margin)
+
+            return image
+        except Exception as e:
+            logger.debug(f"Could not apply style settings: {e}")
+            return image
 
     def _add_plugin_icon_overlay(self, image, plugin_id):
-        """Add a small plugin icon with dark backing circle in the bottom-right corner."""
+        """Add a full-color plugin icon with adaptive backing circle in the top-left corner."""
         try:
             from PIL import ImageDraw
 
@@ -412,38 +566,42 @@ class RefreshTask:
 
             icon = Image.open(icon_path).convert("RGBA")
 
-            # Scale icon to ~5% of image height
+            # Scale icon to ~6% of image height for better color visibility
             img_w, img_h = image.size
-            icon_size = max(28, int(img_h * 0.05))
+            icon_size = max(28, int(img_h * 0.06))
             icon = icon.resize((icon_size, icon_size), Image.LANCZOS)
 
             # Create backing circle (slightly larger than icon)
             circle_padding = max(4, int(icon_size * 0.2))
             circle_size = icon_size + circle_padding * 2
+
+            # Position in top-left corner (least content overlap across all plugins)
+            padding = max(6, int(img_h * 0.01))
+            x = padding
+            y = padding
+
+            # Sample background brightness to choose adaptive circle color
+            region = image.crop((x, y, min(x + circle_size, img_w), min(y + circle_size, img_h)))
+            mean_brightness = region.convert("L").resize((1, 1), Image.LANCZOS).getpixel((0, 0))
+
+            if mean_brightness < 128:
+                circle_fill = (255, 255, 255, 180)
+            else:
+                circle_fill = (0, 0, 0, 140)
+
             circle = Image.new("RGBA", (circle_size, circle_size), (0, 0, 0, 0))
             circle_draw = ImageDraw.Draw(circle)
-            circle_draw.ellipse([0, 0, circle_size - 1, circle_size - 1], fill=(0, 0, 0, 140))
+            circle_draw.ellipse([0, 0, circle_size - 1, circle_size - 1], fill=circle_fill)
 
-            # Convert icon to white silhouette (preserve alpha, make RGB white)
-            r, g, b, a = icon.split()
-            white = Image.new("L", icon.size, 255)
-            icon = Image.merge("RGBA", (white, white, white, a))
-
-            # Paste icon centered on circle
+            # Paste full-color icon centered on circle
             circle.paste(icon, (circle_padding, circle_padding), icon)
 
-            # Position in bottom-right with padding
-            padding = max(6, int(img_h * 0.01))
-            x = img_w - circle_size - padding
-            y = img_h - circle_size - padding
-
             # Paste onto image
-            img = image.copy()
-            if img.mode != "RGBA":
-                img = img.convert("RGBA")
-            img.paste(circle, (x, y), circle)
+            if image.mode != "RGBA":
+                image = image.convert("RGBA")
+            image.paste(circle, (x, y), circle)
 
-            return img
+            return image
         except Exception as e:
             logger.debug(f"Could not add plugin icon overlay: {e}")
             return image
@@ -490,9 +648,9 @@ class RefreshTask:
         }
         self.device_config.update_value("auto_refresh_tracking", tracking, write=False)  # Don't write immediately, will be batched
 
-    def _determine_next_plugin_loop_mode(self, loop_manager, current_dt):
+    def _determine_next_plugin_loop_mode(self, loop_manager, current_dt, override=None):
         """Determines the next plugin to refresh in loop mode based on the active loop and rotation."""
-        loop = loop_manager.determine_active_loop(current_dt)
+        loop = loop_manager.determine_active_loop(current_dt, override=override)
         if not loop:
             loop_manager.active_loop = None
             logger.info("No active loop determined.")
@@ -509,6 +667,26 @@ class RefreshTask:
         logger.info(f"Determined next plugin. | active_loop: {loop.name} | plugin_id: {plugin_ref.plugin_id}")
 
         return loop, plugin_ref
+
+    def _find_any_plugin_id(self):
+        """Find any configured plugin ID for first-boot display fallback.
+
+        Searches loops first (most likely to have settings), then falls back to
+        the installed plugin list.
+        """
+        try:
+            loop_manager = self.device_config.get_loop_manager()
+            for loop in loop_manager.loops:
+                if loop.plugin_order:
+                    return loop.plugin_order[0].plugin_id
+        except Exception as e:
+            logger.debug("Could not search loops for fallback plugin: %s", e)
+
+        # Fall back to first installed plugin
+        plugins = self.device_config.get_plugins()
+        if plugins:
+            return plugins[0].get("id")
+        return None
 
     def log_system_stats(self):
         # Use non-blocking CPU sampling (returns estimate since last call)
@@ -632,8 +810,8 @@ class LoopRefresh(RefreshAction):
         Special handling: If randomization is enabled (randomizeWpotd, randomizeApod),
         always generate a new image to get a different random selection.
         """
-        # Determine the file path for the plugin's image
-        plugin_image_path = os.path.join(device_config.plugin_image_dir, f"loop_{self.plugin_reference.plugin_id}.png")
+        # Determine the file path for the plugin's image (JPEG for faster I/O)
+        plugin_image_path = os.path.join(device_config.plugin_image_dir, f"loop_{self.plugin_reference.plugin_id}.jpg")
 
         # Check if this plugin has randomization enabled
         settings = self.plugin_reference.plugin_settings or {}
@@ -648,11 +826,18 @@ class LoopRefresh(RefreshAction):
             logger.info(f"Refreshing plugin data ({reason}). | plugin_id: '{self.plugin_reference.plugin_id}'")
             # Generate a new image with plugin's settings (or empty dict if none)
             image = plugin.generate_image(self.plugin_reference.plugin_settings, device_config)
-            image.save(plugin_image_path)
+            if image is None:
+                return None  # Plugin opted to skip (e.g., grace period)
+            # Save cache as JPEG (much faster than PNG on Pi)
+            cache_img = image.convert("RGB") if image.mode != "RGB" else image
+            cache_img.save(plugin_image_path, "JPEG", quality=90)
             self.plugin_reference.latest_refresh_time = current_dt.isoformat()
         else:
             logger.info(f"Plugin data still fresh, using cached image. | plugin_id: {self.plugin_reference.plugin_id}")
-            # Load the existing image from disk if it exists
+            # Load the existing image from disk if it exists (check legacy .png too)
+            legacy_png = plugin_image_path.replace(".jpg", ".png")
+            if not os.path.exists(plugin_image_path) and os.path.exists(legacy_png):
+                plugin_image_path = legacy_png
             if os.path.exists(plugin_image_path):
                 with Image.open(plugin_image_path) as img:
                     image = img.copy()
@@ -660,7 +845,8 @@ class LoopRefresh(RefreshAction):
                 # First time displaying this plugin, generate new image
                 logger.info(f"No cached image found, generating new image. | plugin_id: {self.plugin_reference.plugin_id}")
                 image = plugin.generate_image(self.plugin_reference.plugin_settings, device_config)
-                image.save(plugin_image_path)
+                cache_img = image.convert("RGB") if image.mode != "RGB" else image
+                cache_img.save(plugin_image_path, "JPEG", quality=90)
                 self.plugin_reference.latest_refresh_time = current_dt.isoformat()
 
         return image
