@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#1a1a2e"/>
+  <!-- E-ink display frame -->
+  <rect x="5" y="4" width="22" height="24" rx="2" fill="#f0ead6" stroke="#16213e" stroke-width="1.5"/>
+  <!-- Ink drop -->
+  <path d="M16 8 C16 8, 11 15, 11 18.5 C11 21.3 13.2 23.5 16 23.5 C18.8 23.5 21 21.3 21 18.5 C21 15 16 8 16 8Z" fill="#1a1a2e"/>
+  <!-- Ink drop highlight -->
+  <ellipse cx="14" cy="17" rx="1.5" ry="2" fill="#f0ead6" opacity="0.3"/>
+</svg>
