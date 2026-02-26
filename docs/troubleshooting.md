@@ -156,7 +156,7 @@ Also consider supporting the important work of Freedom Forum, an organization de
 
 ## Known Issues during Pi Zero W Installation
 
-Due to limitations with the Pi Zero W, there are some known issues during the InkyPi installation process. For more details and community discussion, refer to this [GitHub Issue](https://github.com/fatihak/InkyPi/issues/5).
+Due to limitations with the Pi Zero W, there are some known issues during the InkyPi installation process. For more details and community discussion, refer to this [GitHub Issue](https://github.com/SHagler2/InkyPi/issues/5).
 
 ### Pip Installation Error
 

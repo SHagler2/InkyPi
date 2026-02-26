@@ -182,7 +182,7 @@ Your repository must include:
 
 ---
 
-See [InkyPi-Plugin-Template](https://github.com/fatihak/InkyPi-Plugin-Template) for a sample template of a third party plugin.
+See [InkyPi-Plugin-Template](https://github.com/SHagler2/InkyPi-Plugin-Template) for a sample template of a third party plugin.
 
-Once you're done, feel free to add your plugin to the [3rd Party Plugin List](https://github.com/fatihak/InkyPi/wiki/3rd-Party-Plugins) and share it in the [🙌 Show and Tell Discussion Board](https://github.com/fatihak/InkyPi/discussions/categories/show-and-tell).
+Once you're done, feel free to add your plugin to the [3rd Party Plugin List](https://github.com/SHagler2/InkyPi/wiki/3rd-Party-Plugins) and share it in the [🙌 Show and Tell Discussion Board](https://github.com/SHagler2/InkyPi/discussions/categories/show-and-tell).
 

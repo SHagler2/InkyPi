@@ -1,6 +1,6 @@
 # InkyPi Fork - Complete Comparison from Original
 
-**Original Repository:** [fatihak/InkyPi](https://github.com/fatihak/InkyPi)
+**Original Repository:** [fatihak/InkyPi](https://github.com/fatihak/InkyPi) (upstream)
 **Upstream Commit:** `fb71cc3` (Handle background image color for grayscale images)
 **Fork Date:** February 2026
 **Current Version:** v2.1.0+
