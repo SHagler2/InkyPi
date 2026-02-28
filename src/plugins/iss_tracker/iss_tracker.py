@@ -2,6 +2,7 @@ import json
 import logging
 import math
 import os
+import threading
 import time as time_module
 from datetime import datetime, timezone, timedelta
 
@@ -22,17 +23,126 @@ ISS_CATALOG_NUMBER = 25544
 PREPASS_TRIGGER_DEFAULT = 20  # minutes before pass
 POSTPASS_DURATION = 5  # minutes after pass
 
+# Cache refresh intervals (seconds)
+PASS_REFRESH_INTERVAL = 300    # 5 minutes
+CREW_REFRESH_INTERVAL = 1800   # 30 minutes
+TRACK_REFRESH_INTERVAL = 30    # 30 seconds
+GEOCODE_MOVE_THRESHOLD = 0.5   # degrees before re-geocoding
+VIEWPORT_MOVE_THRESHOLD = 1.0  # degrees before re-cropping map
+
 
 class ISSTracker(BasePlugin):
+    def __init__(self, config, **dependencies):
+        super().__init__(config, **dependencies)
+        self._lock = threading.Lock()
+
+        # Cached heavy data
+        self._cached_passes = None
+        self._last_pass_fetch_time = 0
+
+        self._cached_crew_count = 0
+        self._last_crew_fetch_time = 0
+
+        # Cached map viewport
+        self._cached_viewport = None
+        self._viewport_key = None
+
+        # Cached ground track points
+        self._cached_ground_track = None
+        self._last_track_time = 0
+
+        # Cached pass arc (expensive: loads de421.bsp)
+        self._cached_pass_arc = None
+        self._pass_arc_key = None
+
+        # Cached reverse geocode
+        self._cached_over_text = None
+        self._over_text_position = None
+
+        # Loaded-once resources
+        self._world_map = None
+        self._landmarks = None
+        self._iss_marker = None
+
     def generate_settings_template(self):
         template_params = super().generate_settings_template()
         template_params['style_settings'] = False
+        template_params['hide_refresh_interval'] = True
         template_params['api_key'] = {
             "required": False,
             "service": "N2YO",
             "expected_key": "N2YO_SECRET"
         }
         return template_params
+
+    def _get_world_map(self):
+        """Load world map image once and cache in memory."""
+        if self._world_map is None:
+            map_path = os.path.join(self.get_plugin_dir(), "resources", "world_map.png")
+            try:
+                self._world_map = Image.open(map_path).convert("RGB")
+                logger.info("World map loaded into memory")
+            except Exception:
+                logger.warning("World map not found")
+                self._world_map = False  # sentinel to avoid retrying
+        return self._world_map if self._world_map is not False else None
+
+    def _get_landmarks(self):
+        """Load landmarks.json once and cache in memory."""
+        if self._landmarks is None:
+            landmarks_path = os.path.join(self.get_plugin_dir(), "resources", "landmarks.json")
+            try:
+                with open(landmarks_path, "r") as f:
+                    self._landmarks = json.load(f)
+                logger.info(f"Loaded {len(self._landmarks)} landmarks")
+            except Exception:
+                self._landmarks = []
+        return self._landmarks
+
+    def _get_iss_marker(self, map_dimension):
+        """Load and scale the ISS marker image, cached after first load."""
+        if self._iss_marker is None:
+            marker_path = os.path.join(self.get_plugin_dir(), "resources", "iss_marker.png")
+            try:
+                self._iss_marker = Image.open(marker_path).convert("RGBA")
+                logger.info("ISS marker image loaded")
+            except Exception:
+                logger.warning("ISS marker image not found")
+                self._iss_marker = False
+        marker = self._iss_marker if self._iss_marker is not False else None
+        if marker:
+            # Scale to ~15% of map dimension
+            target = max(40, int(map_dimension * 0.15))
+            ratio = target / max(marker.width, marker.height)
+            scaled = marker.resize(
+                (int(marker.width * ratio), int(marker.height * ratio)),
+                Image.LANCZOS,
+            )
+            # Tint to red for contrast against ocean blue and land green
+            import numpy as np
+            arr = np.array(scaled, dtype=np.float32)
+            lum = 0.299 * arr[:,:,0] + 0.587 * arr[:,:,1] + 0.114 * arr[:,:,2]
+            lum = lum / 255.0
+            arr[:,:,0] = lum * 255  # R channel
+            arr[:,:,1] = lum * 50   # G channel
+            arr[:,:,2] = lum * 30   # B channel
+            # Keep original alpha
+            tinted = Image.fromarray(arr.astype(np.uint8), "RGBA")
+            return tinted
+        return None
+
+    def _get_pass_arc(self, tle_lines, pass_data, obs_lat, obs_lon):
+        """Get pass arc, using cache if available for this pass."""
+        if not pass_data or "rise_utc" not in pass_data:
+            return []
+        key = pass_data["rise_utc"].isoformat()
+        if self._cached_pass_arc is not None and self._pass_arc_key == key:
+            return self._cached_pass_arc
+        arc = _compute_pass_arc(tle_lines, pass_data, obs_lat, obs_lon)
+        self._cached_pass_arc = arc
+        self._pass_arc_key = key
+        logger.info(f"Computed pass arc: {len(arc)} points")
+        return arc
 
     def generate_image(self, settings, device_config):
         dimensions = device_config.get_resolution()
@@ -59,70 +169,81 @@ class ISSTracker(BasePlugin):
         tle_lines = _load_tle(tle_cache_path)
 
         now_utc = datetime.now(timezone.utc)
-        iss_lat, iss_lon, iss_alt_km = _compute_iss_position(tle_lines, now_utc)
+        now_mono = time_module.monotonic()
 
-        n2yo_api_key = device_config.load_env_key("N2YO_SECRET")
-        passes = _predict_passes(
-            tle_lines, lat, lon, now_utc, n2yo_api_key
-        )
+        # TIER 1: Always compute (cheap SGP4 math)
+        iss_lat, iss_lon, iss_alt_km = _compute_iss_position(tle_lines, now_utc)
+        speed_kmh = _orbital_speed(iss_alt_km)
+
+        with self._lock:
+            # TIER 2: Pass predictions — refresh every 5 minutes or when all cached passes are stale
+            all_stale = (self._cached_passes is not None and
+                         all(p.get("set_utc", now_utc) <= now_utc for p in self._cached_passes))
+            if self._cached_passes is None or all_stale or (now_mono - self._last_pass_fetch_time) >= PASS_REFRESH_INTERVAL:
+                n2yo_api_key = device_config.load_env_key("N2YO_SECRET")
+                try:
+                    new_passes = _predict_passes(tle_lines, lat, lon, now_utc, n2yo_api_key)
+                    if new_passes is not None:
+                        self._cached_passes = new_passes
+                        self._last_pass_fetch_time = now_mono
+                        logger.info(f"Refreshed pass predictions: {len(new_passes)} passes")
+                except Exception as e:
+                    logger.warning(f"Pass prediction failed: {e}")
+            # Filter out passes that have already ended
+            all_passes = self._cached_passes or []
+            passes = [p for p in all_passes if p.get("set_utc", now_utc) > now_utc]
+
+            # TIER 3: Crew count — refresh every 30 minutes
+            if self._cached_crew_count == 0 or (now_mono - self._last_crew_fetch_time) >= CREW_REFRESH_INTERVAL:
+                count = _get_crew_count()
+                if count > 0:
+                    self._cached_crew_count = count
+                    self._last_crew_fetch_time = now_mono
+            crew_count = self._cached_crew_count
+
+            # TIER 4: Reverse geocode — only when ISS moves significantly
+            landmarks = self._get_landmarks()
+            if (self._cached_over_text is None or self._over_text_position is None or
+                    abs(iss_lat - self._over_text_position[0]) > GEOCODE_MOVE_THRESHOLD or
+                    abs(iss_lon - self._over_text_position[1]) > GEOCODE_MOVE_THRESHOLD):
+                self._cached_over_text = _reverse_geocode_from_data(iss_lat, iss_lon, landmarks)
+                self._over_text_position = (iss_lat, iss_lon)
+            over_text = self._cached_over_text
+
+            # TIER 5: Ground track — refresh every 30 seconds
+            if self._cached_ground_track is None or (now_mono - self._last_track_time) >= TRACK_REFRESH_INTERVAL:
+                self._cached_ground_track = _compute_ground_track(tle_lines, now_utc)
+                self._last_track_time = now_mono
 
         mode = _determine_mode(now_utc, passes, prepass_minutes)
-
-        crew_count = _get_crew_count()
-
-        landmarks_path = os.path.join(
-            self.get_plugin_dir(), "resources", "landmarks.json"
-        )
-        over_text = _reverse_geocode(iss_lat, iss_lon, landmarks_path)
-
-        speed_kmh = _orbital_speed(iss_alt_km)
 
         timezone_name = device_config.get_config("timezone", default="UTC")
         time_format = device_config.get_config("time_format", default="12h")
 
-        # Find observer's nearest city for "Next pass over <city>" display
-        obs_city = _nearest_city(lat, lon, landmarks_path)
+        obs_city = settings.get("cityName", "").split(",")[0].strip()
+        if not obs_city:
+            obs_city = _nearest_city_from_data(lat, lon, landmarks)
 
         if mode == "nadir":
             img = self._render_nadir(
-                dimensions,
-                iss_lat,
-                iss_lon,
-                iss_alt_km,
-                speed_kmh,
-                crew_count,
-                over_text,
-                passes,
-                units,
-                timezone_name,
-                time_format,
-                tle_lines,
-                now_utc,
-                obs_city,
+                dimensions, iss_lat, iss_lon, iss_alt_km, speed_kmh,
+                crew_count, over_text, passes, units, timezone_name,
+                time_format, now_utc, obs_city,
             )
         elif mode == "prepass":
             active_pass = _get_active_pass(now_utc, passes, prepass_minutes)
+            arc_points = self._get_pass_arc(tle_lines, active_pass, lat, lon)
             img = self._render_skyplot(
-                dimensions,
-                active_pass,
-                lat,
-                lon,
-                tle_lines,
-                now_utc,
-                timezone_name,
-                time_format,
+                dimensions, active_pass, arc_points, now_utc,
+                timezone_name, time_format,
                 during_pass=_is_during_pass(now_utc, active_pass),
             )
         else:  # postpass
             recent_pass = _get_recent_pass(now_utc, passes)
+            arc_points = self._get_pass_arc(tle_lines, recent_pass, lat, lon)
             img = self._render_postpass(
-                dimensions,
-                recent_pass,
-                lat,
-                lon,
-                tle_lines,
-                timezone_name,
-                time_format,
+                dimensions, recent_pass, arc_points,
+                now_utc, timezone_name, time_format,
             )
 
         return img
@@ -142,7 +263,6 @@ class ISSTracker(BasePlugin):
         units,
         timezone_name,
         time_format,
-        tle_lines,
         now_utc,
         obs_city="",
     ):
@@ -150,11 +270,15 @@ class ISSTracker(BasePlugin):
         info_h = int(h * 0.18)
         map_h = h - info_h
 
-        map_path = os.path.join(self.get_plugin_dir(), "resources", "world_map.png")
-        map_img = self._crop_map_viewport(map_path, iss_lat, iss_lon, w, map_h)
+        world = self._get_world_map()
+        map_img = self._crop_map_viewport(world, iss_lat, iss_lon, w, map_h)
 
-        img = Image.new("RGB", dimensions, (255, 255, 255))
+        img = Image.new("RGBA", dimensions, (15, 20, 30, 255))
         img.paste(map_img, (0, 0))
+
+        # Dim the map slightly to reduce glare and improve marker visibility
+        dim_overlay = Image.new("RGBA", (w, map_h), (0, 0, 0, 70))
+        img.alpha_composite(dim_overlay, (0, 0))
 
         draw = ImageDraw.Draw(img)
 
@@ -162,61 +286,34 @@ class ISSTracker(BasePlugin):
         footprint_radius_deg = _footprint_radius(alt_km)
         self._draw_footprint(draw, iss_lat, iss_lon, footprint_radius_deg, w, map_h)
 
-        # Draw ground track (future orbit path)
-        self._draw_ground_track(draw, tle_lines, now_utc, w, map_h)
+        # Draw ground track from cache
+        self._draw_ground_track(draw, self._cached_ground_track or [], iss_lat, iss_lon, w, map_h)
 
-        # Draw ISS crosshair marker at center
+        # Draw ISS marker image at center
         cx, cy = w // 2, map_h // 2
-        marker_size = min(w, map_h) // 30
-        draw.line(
-            [(cx - marker_size, cy), (cx + marker_size, cy)],
-            fill=(255, 0, 0),
-            width=2,
-        )
-        draw.line(
-            [(cx, cy - marker_size), (cx, cy + marker_size)],
-            fill=(255, 0, 0),
-            width=2,
-        )
-        draw.ellipse(
-            [
-                cx - marker_size // 2,
-                cy - marker_size // 2,
-                cx + marker_size // 2,
-                cy + marker_size // 2,
-            ],
-            outline=(255, 0, 0),
-            width=2,
-        )
+        marker = self._get_iss_marker(min(w, map_h))
+        if marker:
+            mx, my = cx - marker.width // 2, cy - marker.height // 2
+            img.paste(marker, (mx, my), marker)
 
         # Info strip
         self._draw_info_strip(
-            draw,
-            w,
-            h,
-            info_h,
-            map_h,
-            iss_lat,
-            iss_lon,
-            alt_km,
-            speed_kmh,
-            crew_count,
-            over_text,
-            passes,
-            units,
-            timezone_name,
-            time_format,
-            obs_city,
+            draw, w, h, info_h, map_h, iss_lat, iss_lon, alt_km,
+            speed_kmh, crew_count, over_text, passes, units,
+            timezone_name, time_format, now_utc, obs_city,
         )
 
-        return img
+        return img.convert("RGB")
 
-    def _crop_map_viewport(self, map_path, lat, lon, vw, vh):
-        try:
-            world = Image.open(map_path).convert("RGB")
-        except Exception:
-            logger.warning("World map not found, using blank background")
-            return Image.new("RGB", (vw, vh), (200, 210, 220))
+    def _crop_map_viewport(self, world, lat, lon, vw, vh):
+        """Crop viewport from pre-loaded world map with caching."""
+        # Check cache: re-crop only when ISS moves >1 degree
+        viewport_key = (round(lat, 0), round(lon, 0), vw, vh)
+        if self._cached_viewport is not None and self._viewport_key == viewport_key:
+            return self._cached_viewport
+
+        if world is None:
+            return Image.new("RGB", (vw, vh), (30, 40, 50))
 
         mw, mh = world.size
 
@@ -243,16 +340,13 @@ class ISSTracker(BasePlugin):
 
         # Handle horizontal wrapping at dateline
         if x1 < 0 or x1 + crop_w > mw:
-            # Need to wrap
-            viewport = Image.new("RGB", (crop_w, crop_h), (200, 210, 220))
+            viewport = Image.new("RGB", (crop_w, crop_h), (30, 40, 50))
             if x1 < 0:
-                # Left side wraps around
                 right_part = world.crop((mw + x1, y1, mw, y1 + crop_h))
                 left_part = world.crop((0, y1, x1 + crop_w, y1 + crop_h))
                 viewport.paste(right_part, (0, 0))
                 viewport.paste(left_part, (right_part.width, 0))
             else:
-                # Right side wraps around
                 left_part = world.crop((x1, y1, mw, y1 + crop_h))
                 right_part = world.crop((0, y1, crop_w - left_part.width, y1 + crop_h))
                 viewport.paste(left_part, (0, 0))
@@ -260,7 +354,11 @@ class ISSTracker(BasePlugin):
         else:
             viewport = world.crop((x1, y1, x1 + crop_w, y1 + crop_h))
 
-        return viewport.resize((vw, vh), Image.LANCZOS)
+        result = viewport.resize((vw, vh), Image.LANCZOS)
+        self._cached_viewport = result
+        self._viewport_key = viewport_key
+        logger.info(f"Re-cropped map viewport at ({lat:.0f}, {lon:.0f})")
+        return result
 
     def _draw_footprint(self, draw, lat, lon, radius_deg, w, map_h):
         # Draw a circle on the map representing the ISS footprint
@@ -283,25 +381,10 @@ class ISSTracker(BasePlugin):
             if len(points) > 2:
                 draw.line(points, fill=(0, 180, 0), width=2)
 
-    def _draw_ground_track(self, draw, tle_lines, now_utc, w, map_h):
-        # Draw future ground track (next ~90 min orbit)
-        if not tle_lines:
+    def _draw_ground_track(self, draw, track_points, ref_lat, ref_lon, w, map_h):
+        """Draw pre-computed ground track points on the map."""
+        if len(track_points) < 2:
             return
-
-        points = []
-        for minutes_ahead in range(0, 95, 2):
-            t = now_utc + timedelta(minutes=minutes_ahead)
-            try:
-                lat, lon, _ = _compute_iss_position(tle_lines, t)
-                points.append((lat, lon))
-            except Exception:
-                break
-
-        if len(points) < 2:
-            return
-
-        # Reference point is the ISS position (center of viewport)
-        ref_lat, ref_lon = points[0]
 
         # Convert to viewport pixels
         degrees_visible_lon = 120
@@ -312,9 +395,8 @@ class ISSTracker(BasePlugin):
         cx, cy = w // 2, map_h // 2
         pixel_points = []
         prev_px = None
-        for lat, lon in points:
+        for lat, lon in track_points:
             dlon = lon - ref_lon
-            # Normalize to [-180, 180]
             if dlon > 180:
                 dlon -= 360
             elif dlon < -180:
@@ -324,7 +406,6 @@ class ISSTracker(BasePlugin):
             px = cx + dlon * px_per_deg_x
             py = cy - dlat * px_per_deg_y
 
-            # Detect large jumps (dateline crossing in viewport)
             if prev_px is not None and abs(px - prev_px) > w * 0.5:
                 if len(pixel_points) > 1:
                     draw.line(pixel_points, fill=(255, 200, 0), width=1)
@@ -353,10 +434,13 @@ class ISSTracker(BasePlugin):
         units,
         timezone_name,
         time_format,
+        now_utc,
         obs_city="",
     ):
         # Background
         draw.rectangle([(0, map_h), (w, h)], fill=(0, 0, 0))
+
+        is_vertical = h > w
 
         font_size = max(int(info_h * 0.22), 12)
         small_font_size = max(int(info_h * 0.18), 10)
@@ -377,6 +461,31 @@ class ISSTracker(BasePlugin):
             fill=accent_color,
             font=font,
         )
+
+        # Vertical mode: simplified info strip (full details in horizontal only)
+        if is_vertical:
+            if units == "imperial":
+                alt_str = f"Alt: {alt_km * 0.621371:.0f} mi"
+            else:
+                alt_str = f"Alt: {alt_km:.0f} km"
+            lat_dir = "N" if lat >= 0 else "S"
+            lon_dir = "E" if lon >= 0 else "W"
+            coord_str = f"{abs(lat):.1f}\u00b0{lat_dir}, {abs(lon):.1f}\u00b0{lon_dir}"
+            draw.text(
+                (padding, y_base + line_spacing),
+                f"{alt_str}  |  {coord_str}",
+                fill=text_color,
+                font=small_font,
+            )
+            hint = "Pass details available in horizontal mode"
+            hint_w = draw.textbbox((0, 0), hint, font=small_font)[2]
+            draw.text(
+                ((w - hint_w) // 2, y_base + line_spacing * 2),
+                hint,
+                fill=(120, 120, 120),
+                font=small_font,
+            )
+            return
 
         # Line 2: Alt, Speed, Crew
         if units == "imperial":
@@ -408,49 +517,72 @@ class ISSTracker(BasePlugin):
             font=small_font,
         )
 
-        # Right side: Next pass info
-        if passes:
-            next_pass = passes[0]
-            try:
-                import pytz
+        # Right side: Next pass + next visible pass info
+        try:
+            import pytz
+            tz = pytz.timezone(timezone_name)
+        except Exception:
+            tz = timezone.utc
 
-                tz = pytz.timezone(timezone_name)
-            except Exception:
-                tz = timezone.utc
+        next_any = passes[0] if passes else None
+        next_visible = next((p for p in passes if p.get("visible")), None)
 
-            rise_local = next_pass["rise_utc"].astimezone(tz)
-            if time_format == "24h":
-                time_str = rise_local.strftime("%H:%M")
+        def _format_pass_time(p):
+            rise_local = p["rise_utc"].astimezone(tz)
+            now_local = now_utc.astimezone(tz)
+            time_str = rise_local.strftime("%H:%M") if time_format == "24h" else rise_local.strftime("%I:%M %p").lstrip("0")
+            if rise_local.date() == now_local.date():
+                return f"Today {time_str}"
+            elif rise_local.date() == (now_local + timedelta(days=1)).date():
+                return f"Tomorrow {time_str}"
             else:
-                time_str = rise_local.strftime("%I:%M %p").lstrip("0")
+                return f"{rise_local.strftime('%b %-d')} {time_str}"
 
-            max_el = next_pass.get("max_elevation", 0)
+        def _right_align(text, y, fill, f):
+            bbox = draw.textbbox((0, 0), text, font=f)
+            draw.text((w - padding - (bbox[2] - bbox[0]), y), text, fill=fill, font=f)
+
+        # Tier 1 (headline/accent): Visible pass — the key info
+        # Tier 2 (detail/white): Next overhead pass
+        # Tier 3 (meta/gray): Direction and duration
+        meta_color = (180, 180, 180)
+        line = 0
+
+        if next_visible:
+            vis_time = _format_pass_time(next_visible)
+            vis_el = next_visible.get("max_elevation", 0)
             if obs_city:
-                pass_text = f"Next pass over {obs_city}: {time_str}"
+                vis_text = f"Visible over {obs_city}: {vis_time} ({vis_el:.0f}\u00b0)"
             else:
-                pass_text = f"Next pass: {time_str}"
-            el_text = f"Max el: {max_el:.0f}\u00b0"
+                vis_text = f"Next visible: {vis_time} ({vis_el:.0f}\u00b0)"
+            _right_align(vis_text, y_base + line_spacing * line, accent_color, font)
+            line += 1
 
-            # Right-align
-            if font:
-                bbox = draw.textbbox((0, 0), pass_text, font=font)
-                tw = bbox[2] - bbox[0]
-                draw.text(
-                    (w - padding - tw, y_base),
-                    pass_text,
-                    fill=accent_color,
-                    font=font,
-                )
+            # Next overhead pass (if different from visible)
+            if next_any and next_any is not next_visible:
+                any_time = _format_pass_time(next_any)
+                any_el = next_any.get("max_elevation", 0)
+                _right_align(f"Next pass: {any_time} ({any_el:.0f}\u00b0)",
+                             y_base + line_spacing * line, text_color, small_font)
+                line += 1
 
-            if small_font:
-                bbox2 = draw.textbbox((0, 0), el_text, font=small_font)
-                tw2 = bbox2[2] - bbox2[0]
-                draw.text(
-                    (w - padding - tw2, y_base + line_spacing),
-                    el_text,
-                    fill=text_color,
-                    font=small_font,
-                )
+            # Direction and duration for visible pass
+            rise_az = next_visible.get("rise_azimuth")
+            set_az = next_visible.get("set_azimuth")
+            if rise_az is not None and set_az is not None and "set_utc" in next_visible:
+                rise_dir = _azimuth_to_compass(rise_az)
+                set_dir = _azimuth_to_compass(set_az)
+                duration_s = (next_visible["set_utc"] - next_visible["rise_utc"]).total_seconds()
+                duration_min = int(duration_s // 60)
+                _right_align(f"Look {rise_dir} \u2192 {set_dir}, {duration_min} min",
+                             y_base + line_spacing * line, meta_color, small_font)
+        elif next_any:
+            # No visible passes — show next overhead as headline
+            any_time = _format_pass_time(next_any)
+            any_el = next_any.get("max_elevation", 0)
+            _right_align(f"Next pass: {any_time} ({any_el:.0f}\u00b0)", y_base, accent_color, font)
+            _right_align("No visible passes upcoming",
+                         y_base + line_spacing, meta_color, small_font)
 
     # ───────── Sky Plot (Pre-pass / During Pass) ─────────
 
@@ -458,9 +590,7 @@ class ISSTracker(BasePlugin):
         self,
         dimensions,
         pass_data,
-        obs_lat,
-        obs_lon,
-        tle_lines,
+        arc_points,
         now_utc,
         timezone_name,
         time_format,
@@ -478,24 +608,15 @@ class ISSTracker(BasePlugin):
 
         self._draw_polar_grid(draw, plot_cx, plot_cy, plot_r)
 
-        if pass_data:
-            arc_points = _compute_pass_arc(
-                tle_lines, pass_data, obs_lat, obs_lon
-            )
+        if pass_data and arc_points:
             self._draw_pass_arc(
                 draw, arc_points, plot_cx, plot_cy, plot_r, now_utc, during_pass
             )
 
             # Info panel on right
             self._draw_pass_info_panel(
-                draw,
-                w,
-                h,
-                pass_data,
-                now_utc,
-                timezone_name,
-                time_format,
-                during_pass,
+                draw, w, h, pass_data, now_utc,
+                timezone_name, time_format, during_pass,
             )
 
         return img
@@ -678,7 +799,7 @@ class ISSTracker(BasePlugin):
         info_items = [
             ("Rise", rise_str),
             ("Set", set_str),
-            ("Max El", f"{max_el:.0f}\u00b0"),
+            ("Max Elevation", f"{max_el:.0f}\u00b0"),
             ("Duration", duration_str),
         ]
 
@@ -705,9 +826,8 @@ class ISSTracker(BasePlugin):
         self,
         dimensions,
         pass_data,
-        obs_lat,
-        obs_lon,
-        tle_lines,
+        arc_points,
+        now_utc,
         timezone_name,
         time_format,
     ):
@@ -723,9 +843,6 @@ class ISSTracker(BasePlugin):
         self._draw_polar_grid(draw, plot_cx, plot_cy, plot_r)
 
         if pass_data:
-            arc_points = _compute_pass_arc(
-                tle_lines, pass_data, obs_lat, obs_lon
-            )
             # Draw entire arc as completed (yellow)
             if arc_points:
                 for i in range(len(arc_points) - 1):
@@ -784,9 +901,22 @@ class ISSTracker(BasePlugin):
             else:
                 rise_str = rise_local.strftime("%I:%M %p").lstrip("0")
 
+            # Time since pass ended (updates in real-time)
+            since_end = (now_utc - pass_data["set_utc"]).total_seconds()
+            if since_end > 0:
+                mins = int(since_end // 60)
+                secs = int(since_end % 60)
+                draw.text(
+                    (panel_x, y),
+                    f"Ended: {mins}m {secs}s ago",
+                    fill=(255, 255, 255),
+                    font=font,
+                )
+                y += int(font_size * 1.6)
+
             items = [
                 ("Time", rise_str),
-                ("Peak El", f"{max_el:.0f}\u00b0"),
+                ("Peak Elevation", f"{max_el:.0f}\u00b0"),
                 ("Duration", duration_str),
             ]
 
@@ -967,6 +1097,53 @@ def _orbital_speed(alt_km):
     return v * 3600  # km/h
 
 
+def _compute_ground_track(tle_lines, now_utc):
+    """Compute future ground track points (next ~90 min). Cacheable."""
+    if not tle_lines:
+        return []
+    points = []
+    for minutes_ahead in range(0, 95, 2):
+        t = now_utc + timedelta(minutes=minutes_ahead)
+        try:
+            lat, lon, _ = _compute_iss_position(tle_lines, t)
+            points.append((lat, lon))
+        except Exception:
+            break
+    return points
+
+
+def _reverse_geocode_from_data(lat, lon, landmarks):
+    """Find nearest landmark using pre-loaded landmarks data."""
+    if not landmarks:
+        return _ocean_fallback(lat, lon)
+    min_dist = float("inf")
+    nearest = None
+    for lm in landmarks:
+        d = _haversine(lat, lon, lm["lat"], lm["lon"])
+        if d < min_dist:
+            min_dist = d
+            nearest = lm
+    if nearest and min_dist < 1000:
+        return f"{min_dist:.0f} km from {nearest['name']}"
+    return _ocean_fallback(lat, lon)
+
+
+def _nearest_city_from_data(lat, lon, landmarks):
+    """Find nearest city name from pre-loaded landmarks data."""
+    if not landmarks:
+        return ""
+    min_dist = float("inf")
+    nearest = None
+    for lm in landmarks:
+        d = _haversine(lat, lon, lm["lat"], lm["lon"])
+        if d < min_dist:
+            min_dist = d
+            nearest = lm
+    if nearest:
+        return nearest["name"].split(",")[0].strip()
+    return ""
+
+
 def _get_crew_count():
     """Get current ISS crew count from Open Notify API."""
     try:
@@ -978,52 +1155,6 @@ def _get_crew_count():
     except Exception as e:
         logger.warning(f"Failed to get crew count: {e}")
         return 0
-
-
-def _nearest_city(lat, lon, landmarks_path):
-    """Find the nearest city name to the observer's location."""
-    try:
-        with open(landmarks_path, "r") as f:
-            landmarks = json.load(f)
-    except Exception:
-        return ""
-
-    min_dist = float("inf")
-    nearest = None
-    for lm in landmarks:
-        d = _haversine(lat, lon, lm["lat"], lm["lon"])
-        if d < min_dist:
-            min_dist = d
-            nearest = lm
-
-    if nearest:
-        # Return just the city name (before the comma)
-        name = nearest["name"]
-        return name.split(",")[0].strip()
-    return ""
-
-
-def _reverse_geocode(lat, lon, landmarks_path):
-    """Find nearest landmark using bundled landmarks.json."""
-    try:
-        with open(landmarks_path, "r") as f:
-            landmarks = json.load(f)
-    except Exception:
-        return _ocean_fallback(lat, lon)
-
-    min_dist = float("inf")
-    nearest = None
-    for lm in landmarks:
-        d = _haversine(lat, lon, lm["lat"], lm["lon"])
-        if d < min_dist:
-            min_dist = d
-            nearest = lm
-
-    if nearest and min_dist < 1000:
-        dist_str = f"{min_dist:.0f} km from {nearest['name']}"
-        return dist_str
-    else:
-        return _ocean_fallback(lat, lon)
 
 
 def _ocean_fallback(lat, lon):
@@ -1127,6 +1258,8 @@ def _predict_passes_skyfield(tle_lines, obs_lat, obs_lon, now_utc):
                         iss_sunlit = diff_at_peak.is_sunlit(eph)
 
                         # Check if observer is in darkness (sun below -6° = civil twilight)
+                        sun = eph["earth"].at(culmination_ti).observe(eph["sun"])
+                        # Use observer's position for sun altitude
                         obs_location = eph["earth"] + observer
                         sun_from_obs = obs_location.at(culmination_ti).observe(eph["sun"])
                         sun_alt, _, _ = sun_from_obs.apparent().altaz()
@@ -1194,8 +1327,10 @@ def _determine_mode(now_utc, passes, prepass_minutes):
 
 
 def _get_active_pass(now_utc, passes, prepass_minutes):
-    """Get the pass that is currently active or upcoming within trigger window."""
+    """Get the visible pass that is currently active or upcoming within trigger window."""
     for p in passes:
+        if not p.get("visible"):
+            continue
         rise = p["rise_utc"]
         sett = p["set_utc"]
         if rise - timedelta(minutes=prepass_minutes) <= now_utc <= sett:
@@ -1204,8 +1339,10 @@ def _get_active_pass(now_utc, passes, prepass_minutes):
 
 
 def _get_recent_pass(now_utc, passes):
-    """Get the pass that just ended (within POSTPASS_DURATION)."""
+    """Get the visible pass that just ended (within POSTPASS_DURATION)."""
     for p in passes:
+        if not p.get("visible"):
+            continue
         sett = p["set_utc"]
         if sett <= now_utc <= sett + timedelta(minutes=POSTPASS_DURATION):
             return p
@@ -1233,6 +1370,9 @@ def _compute_pass_arc(tle_lines, pass_data, obs_lat, obs_lon):
         duration = (sett - rise).total_seconds()
         steps = max(int(duration / 5), 10)  # point every ~5 seconds
 
+        # Load ephemeris ONCE outside the loop (de421.bsp is ~30MB)
+        eph = load("de421.bsp")
+
         arc = []
         for i in range(steps + 1):
             frac = i / steps
@@ -1243,8 +1383,7 @@ def _compute_pass_arc(tle_lines, pass_data, obs_lat, obs_lon):
             topocentric = difference.at(t_sky)
             alt_deg, az_deg, _ = topocentric.altaz()
 
-            # Simple sunlit check: satellite is sunlit if it's above Earth's shadow
-            sunlit = topocentric.is_sunlit(load("de421.bsp"))
+            sunlit = topocentric.is_sunlit(eph)
 
             arc.append((t, az_deg.degrees, alt_deg.degrees, bool(sunlit)))
 
