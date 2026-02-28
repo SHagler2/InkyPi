@@ -1,9 +1,19 @@
-# InkyPi 
+> ## ⚠️ This project has moved to [DashPi](https://github.com/SHagler2/DashPi)
+>
+> InkyPi has been consolidated into **DashPi v2.0** — a unified codebase that supports both **e-ink** and **LCD** displays with automatic hardware detection. All future development, bug fixes, and new plugins will happen in the DashPi repo.
+>
+> **Your existing e-ink hardware is fully supported.** DashPi auto-detects your display type on first boot — no configuration needed.
+>
+> 👉 **[Go to DashPi →](https://github.com/SHagler2/DashPi)**
+
+---
+
+# InkyPi (Legacy)
 
 <img src="./docs/images/inky_clock.jpg" />
 
 
-## About InkyPi 
+## About InkyPi
 InkyPi is an open-source, customizable E-Ink display powered by a Raspberry Pi. Designed for simplicity and flexibility, it allows you to effortlessly display the content you care about, with a simple web interface that makes setup and configuration effortless.
 
 **Features**:
@@ -27,7 +37,7 @@ And additional plugins coming soon! For documentation on building custom plugins
 
 See [the wiki](https://github.com/SHagler2/InkyPi/wiki) for a list of community-maintained third-party plugins.
 
-## Hardware 
+## Hardware
 - Raspberry Pi (4 | 3 | Zero 2 W)
     - Recommended to get 40 pin Pre Soldered Header
 - MicroSD Card (min 8 GB)
@@ -53,9 +63,9 @@ To install InkyPi, follow these steps:
 3. Run the installation script with sudo:
     ```bash
     sudo bash install/install.sh [-W <waveshare device model>]
-    ``` 
-     Option: 
-    
+    ```
+     Option:
+
     * -W \<waveshare device model\> - specify this parameter **ONLY** if installing for a Waveshare display.  After the -W option specify the Waveshare device model e.g. epd7in3f.
 
     e.g. for Inky displays use:
@@ -71,7 +81,7 @@ To install InkyPi, follow these steps:
 
 After the installation is complete, the script will prompt you to reboot your Raspberry Pi. Once rebooted, the display will update to show the InkyPi splash screen.
 
-Note: 
+Note:
 - The installation script requires sudo privileges to install and run the service. We recommend starting with a fresh installation of Raspberry Pi OS to avoid potential conflicts with existing software or configurations.
 - The installation process will automatically enable the required SPI and I2C interfaces on your Raspberry Pi.
 
@@ -116,7 +126,7 @@ Waveshare offers a range of e-Paper displays, similar to the Inky screens from P
 
 This project has been tested with several Waveshare models. **Displays based on the IT8951 controller are not supported**, and **screens smaller than 4 inches are not recommended** due to limited resolution.
 
-If your display model has a corresponding driver in the link above, it’s likely to be compatible. When running the installation script, use the -W option to specify your display model (without the .py extension). The script will automatically fetch and install the correct driver.
+If your display model has a corresponding driver in the link above, it's likely to be compatible. When running the installation script, use the -W option to specify your display model (without the .py extension). The script will automatically fetch and install the correct driver.
 
 ## License
 
