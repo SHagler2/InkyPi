@@ -1,8 +1,8 @@
 import pytest
 
-from src.model import Playlist
+from src.model import Loop
 
-class TestPlaylist:
+class TestLoop:
 
     @pytest.mark.parametrize(
         "start,end,current,expected,priority",
@@ -46,7 +46,7 @@ class TestPlaylist:
         ]
     )
     def test_is_active_and_priority(self, start, end, current, expected, priority):
-        playlist = Playlist("Test Playlist", start, end)
-        assert playlist.is_active(current) == expected
-        assert playlist.get_priority() == priority
+        loop = Loop("Test Loop", start, end)
+        assert loop.is_active(current) == expected
+        assert loop.get_priority() == priority
         
